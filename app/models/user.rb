@@ -5,7 +5,7 @@ class User < ApplicationRecord
          :recoverable, :rememberable, :validatable
 
   # Constants
-  ROLES = %w[family_member photo_admin family_admin].freeze
+  ROLES = Config::FAMILY_ROLES
 
   # Associations
   has_many :uploaded_photos, class_name: 'Photo', foreign_key: 'uploaded_by_id', dependent: :destroy

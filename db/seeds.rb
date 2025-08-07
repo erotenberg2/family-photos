@@ -72,4 +72,4 @@ if Rails.env.development?
   User.all.each do |user|
     puts "  - #{user.display_name} (#{user.email}) - #{user.role_display} - #{user.status_display}"
   end
-end
+endAdminUser.create!(email: 'admin@example.com', password: 'password', password_confirmation: 'password') if Rails.env.development?
