@@ -4,6 +4,9 @@ class User < ApplicationRecord
   devise :database_authenticatable, :registerable,
          :recoverable, :rememberable, :validatable
 
+  # Constants
+  ROLES = %w[family_member photo_admin family_admin].freeze
+
   # Associations
   has_many :uploaded_photos, class_name: 'Photo', foreign_key: 'uploaded_by_id', dependent: :destroy
   has_many :owned_photos, class_name: 'Photo', dependent: :destroy
@@ -14,7 +17,7 @@ class User < ApplicationRecord
   validates :first_name, presence: true, length: { minimum: 1, maximum: 50 }
   validates :last_name, presence: true, length: { minimum: 1, maximum: 50 }
   validates :role, presence: true, inclusion: { 
-    in: %w[family_member photo_admin family_admin],
+    in: ROLES,
     message: 'must be a valid role'
   }
   validates :active, inclusion: { in: [true, false] }
@@ -39,6 +42,11 @@ class User < ApplicationRecord
 
   def family_admin?
     role == 'family_admin'
+  end
+
+  # Class methods for roles
+  def self.roles_for_select
+    ROLES.map { |role| [role.humanize.titleize, role] }
   end
 
   def admin_level?

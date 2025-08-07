@@ -34,7 +34,7 @@ ActiveAdmin.register User do
   filter :email
   filter :first_name
   filter :last_name
-  filter :role, as: :select, collection: %w[family_member photo_admin family_admin]
+  filter :role, as: :select, collection: User::ROLES
   filter :active
   filter :created_at
 
@@ -138,11 +138,7 @@ ActiveAdmin.register User do
       f.input :first_name
       f.input :last_name
       f.input :role, as: :select, 
-              collection: [
-                ['Family Member', 'family_member'],
-                ['Photo Admin', 'photo_admin'],
-                ['Family Admin', 'family_admin']
-              ],
+              collection: User.roles_for_select,
               include_blank: false,
               hint: "Family Member: Can upload photos. Photo Admin: Can manage photos and albums. Family Admin: Can manage users and all content."
       f.input :active, as: :boolean, hint: "Inactive users cannot sign in"
