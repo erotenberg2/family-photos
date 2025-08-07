@@ -11,24 +11,21 @@ ActiveAdmin.register User do
     column :email
     column :full_name
     column :role do |user|
-      status_tag user.role_display, class: user.role.gsub('_', '-')
+      user.role_display
     end
     column :active do |user|
-      status_tag user.status_display, (user.active? ? :yes : :no)
+      user.status_display
     end
     column "Photos" do |user|
-      user.photo_count
+      user.uploaded_photos.count
     end
     column "Albums" do |user|
-      user.album_count
+      user.owned_albums.count
     end
     column "Storage Used" do |user|
       user.storage_used_human
     end
     column :created_at
-    column :last_sign_in_at do |user|
-      user.current_sign_in_at || "Never"
-    end
     
     actions
   end
@@ -50,20 +47,22 @@ ActiveAdmin.register User do
       row :last_name
       row :full_name
       row :role do |user|
-        status_tag user.role_display, class: user.role.gsub('_', '-')
+        user.role_display
       end
       row :active do |user|
-        status_tag user.status_display, (user.active? ? :yes : :no)
+        user.status_display
       end
       row :created_at
       row :updated_at
-      row :last_sign_in_at do |user|
-        user.current_sign_in_at || "Never signed in"
-      end
+
       
       # Statistics
-      row :photo_count
-      row :album_count
+      row :photo_count do |user|
+        user.uploaded_photos.count
+      end
+      row :album_count do |user|
+        user.owned_albums.count
+      end
       row :storage_used do |user|
         user.storage_used_human
       end
@@ -72,16 +71,16 @@ ActiveAdmin.register User do
     panel "Permissions" do
       attributes_table_for user do
         row "Can Upload Photos" do |u|
-          status_tag(u.can_upload_photos? ? "Yes" : "No", u.can_upload_photos? ? :yes : :no)
+          u.can_upload_photos? ? "Yes" : "No"
         end
         row "Can Create Albums" do |u|
-          status_tag(u.can_create_albums? ? "Yes" : "No", u.can_create_albums? ? :yes : :no)
+          u.can_create_albums? ? "Yes" : "No"
         end
         row "Can Manage Users" do |u|
-          status_tag(u.can_manage_users? ? "Yes" : "No", u.can_manage_users? ? :yes : :no)
+          u.can_manage_users? ? "Yes" : "No"
         end
         row "Can Delete Photos" do |u|
-          status_tag(u.can_delete_photos? ? "Yes" : "No", u.can_delete_photos? ? :yes : :no)
+          u.can_delete_photos? ? "Yes" : "No"
         end
       end
     end
@@ -122,7 +121,7 @@ ActiveAdmin.register User do
           end
           column :photo_count
           column :private do |album|
-            status_tag(album.private? ? "Private" : "Public", album.private? ? :no : :yes)
+            album.private? ? "Private" : "Public"
           end
           column :created_at
         end
