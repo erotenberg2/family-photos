@@ -1,0 +1,11 @@
+# Read about fixtures at https://api.rubyonrails.org/classes/ActiveRecord/FixtureSet.html
+
+one:
+  photo: one
+  album: one
+  position: 1
+
+two:
+  photo: two
+  album: two
+  position: 1

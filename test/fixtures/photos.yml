@@ -1,0 +1,31 @@
+# Read about fixtures at https://api.rubyonrails.org/classes/ActiveRecord/FixtureSet.html
+
+one:
+  title: MyString
+  description: MyText
+  file_path: MyString
+  file_size: 1
+  width: 1
+  height: 1
+  taken_at: 2025-08-06 18:15:17
+  exif_data: 
+  thumbnail_path: MyString
+  thumbnail_width: 1
+  thumbnail_height: 1
+  uploaded_by: one
+  user: one
+
+two:
+  title: MyString
+  description: MyText
+  file_path: MyString
+  file_size: 1
+  width: 1
+  height: 1
+  taken_at: 2025-08-06 18:15:17
+  exif_data: 
+  thumbnail_path: MyString
+  thumbnail_width: 1
+  thumbnail_height: 1
+  uploaded_by: two
+  user: two
