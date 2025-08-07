@@ -88,6 +88,7 @@ GEM
       activesupport (>= 3.0.0)
       ruby2_keywords (>= 0.0.2)
     ast (2.4.3)
+    awesome_print (1.9.2)
     base64 (0.3.0)
     bcrypt (3.1.20)
     bcrypt_pbkdf (1.1.1)
@@ -451,6 +452,7 @@ PLATFORMS
 
 DEPENDENCIES
   activeadmin
+  awesome_print
   bootsnap
   brakeman
   capybara

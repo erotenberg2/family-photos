@@ -13,7 +13,7 @@ class Photo < ApplicationRecord
   validates :width, :height, presence: true, numericality: { greater_than: 0 }
   validates :original_filename, presence: true
   validates :content_type, presence: true, inclusion: { 
-    in: %w[image/jpeg image/jpg image/png image/gif image/bmp image/tiff],
+    in: %w[image/jpeg image/jpg image/png image/gif image/bmp image/tiff image/heic image/heif],
     message: 'must be a valid image format'
   }
 
@@ -50,41 +50,77 @@ class Photo < ApplicationRecord
 
   # Instance methods
   def extract_exif_data(file_path)
-    require 'exifr/jpeg'
-    require 'exifr/tiff'
-    
     return {} unless File.exist?(file_path)
     
     begin
       case content_type
       when 'image/jpeg', 'image/jpg'
+        require 'exifr/jpeg'
         exif = EXIFR::JPEG.new(file_path)
+        return {} unless exif
+        exif.to_hash
       when 'image/tiff'
+        require 'exifr/tiff'
         exif = EXIFR::TIFF.new(file_path)
+        return {} unless exif
+        exif.to_hash
+      when 'image/heic', 'image/heif'
+        # HEIC files require different approach - use MiniMagick to extract EXIF
+        extract_heic_exif(file_path)
       else
         return {}
       end
-      
-      return {} unless exif
-      
-      # Extract key EXIF data
-      {
-        camera_make: exif.make,
-        camera_model: exif.model,
-        date_time_original: exif.date_time_original,
-        gps_latitude: exif.gps_latitude,
-        gps_longitude: exif.gps_longitude,
-        orientation: exif.orientation,
-        f_number: exif.f_number,
-        exposure_time: exif.exposure_time,
-        iso_speed_ratings: exif.iso_speed_ratings,
-        focal_length: exif.focal_length,
-        flash: exif.flash,
-        white_balance: exif.white_balance,
-        raw_exif: exif.to_hash
-      }.compact
     rescue => e
       Rails.logger.error "Failed to extract EXIF from #{file_path}: #{e.message}"
+      {}
+    end
+  end
+
+  def extract_heic_exif(file_path)
+    require 'mini_magick'
+    
+    begin
+      image = MiniMagick::Image.open(file_path)
+      exif_data = {}
+      
+      # Extract common EXIF properties from HEIC
+      exif_data['Make'] = image['exif:Make'] if image['exif:Make']
+      exif_data['Model'] = image['exif:Model'] if image['exif:Model'] 
+      exif_data['DateTimeOriginal'] = image['exif:DateTimeOriginal'] if image['exif:DateTimeOriginal']
+      exif_data['Artist'] = image['exif:Artist'] if image['exif:Artist']
+      exif_data['Copyright'] = image['exif:Copyright'] if image['exif:Copyright']
+      exif_data['Software'] = image['exif:Software'] if image['exif:Software']
+      exif_data['HostComputer'] = image['exif:HostComputer'] if image['exif:HostComputer']
+      exif_data['CameraOwnerName'] = image['exif:CameraOwnerName'] if image['exif:CameraOwnerName']
+      exif_data['LensMake'] = image['exif:LensMake'] if image['exif:LensMake']
+      exif_data['LensModel'] = image['exif:LensModel'] if image['exif:LensModel']
+      
+      # GPS data
+      exif_data['GPSLatitude'] = image['exif:GPSLatitude'] if image['exif:GPSLatitude']
+      exif_data['GPSLongitude'] = image['exif:GPSLongitude'] if image['exif:GPSLongitude']
+      exif_data['GPSLatitudeRef'] = image['exif:GPSLatitudeRef'] if image['exif:GPSLatitudeRef']
+      exif_data['GPSLongitudeRef'] = image['exif:GPSLongitudeRef'] if image['exif:GPSLongitudeRef']
+      
+      # Camera settings
+      exif_data['FNumber'] = image['exif:FNumber'] if image['exif:FNumber']
+      exif_data['ExposureTime'] = image['exif:ExposureTime'] if image['exif:ExposureTime']
+      exif_data['ISOSpeedRatings'] = image['exif:ISOSpeedRatings'] if image['exif:ISOSpeedRatings']
+      exif_data['FocalLength'] = image['exif:FocalLength'] if image['exif:FocalLength']
+      exif_data['Flash'] = image['exif:Flash'] if image['exif:Flash']
+      exif_data['WhiteBalance'] = image['exif:WhiteBalance'] if image['exif:WhiteBalance']
+      exif_data['Orientation'] = image['exif:Orientation'] if image['exif:Orientation']
+      
+      # Try to get all EXIF data at once
+      begin
+        all_exif = image.exif
+        exif_data.merge!(all_exif) if all_exif.is_a?(Hash)
+      rescue
+        # Fallback if bulk EXIF extraction fails
+      end
+      
+      exif_data.compact
+    rescue => e
+      Rails.logger.error "Failed to extract HEIC EXIF from #{file_path}: #{e.message}"
       {}
     end
   end
@@ -142,6 +178,30 @@ class Photo < ApplicationRecord
     "#{size.round(1)} #{units[unit_index]}"
   end
 
+  # Debug method to see all available EXIF fields
+  def debug_all_exif_fields
+    return "No file path" unless file_path.present? && File.exist?(file_path)
+    
+    begin
+      require 'exifr/jpeg'
+      exif = EXIFR::JPEG.new(file_path)
+      return "No EXIF data" unless exif
+      
+      # Get all available methods/fields
+      all_fields = exif.to_hash.keys.sort
+      result = "Available EXIF fields (#{all_fields.count}):\n"
+      
+      all_fields.each do |field|
+        value = exif.to_hash[field]
+        result += "#{field}: #{value.inspect}\n"
+      end
+      
+      result
+    rescue => e
+      "Error reading EXIF: #{e.message}"
+    end
+  end
+
   def taken_date
     taken_at || created_at
   end
@@ -154,12 +214,36 @@ class Photo < ApplicationRecord
     exif_info = extract_exif_data(file_path)
     self.exif_data = exif_info
     
-    # Set individual fields from EXIF
-    self.camera_make = exif_info[:camera_make] if exif_info[:camera_make]
-    self.camera_model = exif_info[:camera_model] if exif_info[:camera_model]
-    self.taken_at = exif_info[:date_time_original] if exif_info[:date_time_original]
-    self.latitude = exif_info[:gps_latitude] if exif_info[:gps_latitude]
-    self.longitude = exif_info[:gps_longitude] if exif_info[:gps_longitude]
+    # Extract specific fields from the complete EXIF hash for database columns
+    # This allows for efficient querying while preserving all metadata
+    self.camera_make = exif_info['Make'] if exif_info['Make']
+    self.camera_model = exif_info['Model'] if exif_info['Model']
+    self.taken_at = exif_info['DateTimeOriginal'] if exif_info['DateTimeOriginal']
+    
+    # GPS coordinates might be in different formats
+    self.latitude = extract_gps_coordinate(exif_info, 'GPSLatitude', exif_info['GPSLatitudeRef'])
+    self.longitude = extract_gps_coordinate(exif_info, 'GPSLongitude', exif_info['GPSLongitudeRef'])
+  end
+
+  def extract_gps_coordinate(exif_hash, coord_key, ref_key)
+    coord = exif_hash[coord_key]
+    ref = exif_hash[ref_key]
+    
+    return nil unless coord && ref
+    
+    # Handle different coordinate formats that might be in EXIF
+    case coord
+    when Numeric
+      ref == 'S' || ref == 'W' ? -coord : coord
+    when Array
+      # DMS format [degrees, minutes, seconds]
+      decimal = coord[0] + coord[1]/60.0 + coord[2]/3600.0
+      ref == 'S' || ref == 'W' ? -decimal : decimal
+    else
+      coord
+    end
+  rescue
+    nil
   end
 
   def generate_thumbnail

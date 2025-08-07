@@ -1,0 +1,229 @@
+<div id="title_bar">
+  <div id="titlebar_left">
+    <h2 id="page_title">Import Photos</h2>
+  </div>
+  <div id="titlebar_right">
+    <%= link_to "Back to Photos", family_photos_path, class: "button" %>
+  </div>
+</div>
+
+<div class="import_photos_form">
+  <%= form_with url: import_photos_family_photos_path, method: :post, multipart: true, local: true, html: { id: 'import-photos-form' } do |f| %>
+    
+    <div class="panel">
+      <h3>Select a Directory of Photos</h3>
+      <p>Choose a folder containing image files. All valid image files (JPEG, PNG, GIF, etc.) will be imported.</p>
+      
+      <div class="form_group">
+        <label for="directory-input">Select Directory:</label>
+        <input type="file" 
+               id="directory-input" 
+               webkitdirectory 
+               directory 
+               multiple 
+               accept="image/*"
+               style="margin: 10px 0;">
+        
+        <!-- Hidden container for filtered files that will actually be submitted -->
+        <div id="filtered-files-container" style="display: none;"></div>
+      </div>
+      
+      <div id="file-preview" style="margin: 20px 0; display: none;">
+        <h4>Files to Import:</h4>
+        <div id="file-list" style="max-height: 300px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; background: #f9f9f9;">
+        </div>
+        <p id="file-count" style="font-weight: bold; margin-top: 10px;"></p>
+      </div>
+      
+      <div class="form_actions">
+        <%= f.submit "Import Photos", class: "btn btn-primary", id: "import-button", disabled: true %>
+        <%= link_to "Cancel", family_photos_path, class: "btn btn-secondary" %>
+      </div>
+    </div>
+    
+  <% end %>
+</div>
+
+<style>
+.import_photos_form {
+  max-width: 800px;
+  margin: 20px auto;
+}
+
+.panel {
+  background: white;
+  padding: 20px;
+  border-radius: 5px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.form_group {
+  margin: 15px 0;
+}
+
+.form_group label {
+  display: block;
+  font-weight: bold;
+  margin-bottom: 5px;
+}
+
+.form_actions {
+  margin-top: 20px;
+  text-align: right;
+}
+
+.btn {
+  padding: 10px 20px;
+  margin: 0 5px;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+}
+
+.btn-primary {
+  background: #007cba;
+  color: white;
+}
+
+.btn-primary:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  background: #666;
+  color: white;
+}
+
+.file-item {
+  padding: 5px;
+  border-bottom: 1px solid #eee;
+  display: flex;
+  justify-content: space-between;
+}
+
+.file-item:last-child {
+  border-bottom: none;
+}
+
+.file-name {
+  font-weight: bold;
+}
+
+.file-size {
+  color: #666;
+  font-size: 0.9em;
+}
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const directoryInput = document.getElementById('directory-input');
+  const filePreview = document.getElementById('file-preview');
+  const fileList = document.getElementById('file-list');
+  const fileCount = document.getElementById('file-count');
+  const importButton = document.getElementById('import-button');
+  
+  directoryInput.addEventListener('change', function(e) {
+    const files = Array.from(e.target.files);
+    
+    // Define acceptable image MIME types
+    const acceptableImageTypes = [
+      'image/jpeg',
+      'image/jpg', 
+      'image/png',
+      'image/gif',
+      'image/bmp',
+      'image/tiff',
+      'image/webp',
+      'image/heic',
+      'image/heif'
+    ];
+    
+    // Filter files to only include acceptable image types
+    const imageFiles = files.filter(file => {
+      // Check MIME type
+      if (acceptableImageTypes.includes(file.type.toLowerCase())) {
+        return true;
+      }
+      
+      // Fallback: check file extension for cases where MIME type might not be set
+      const extension = file.name.toLowerCase().split('.').pop();
+      const acceptableExtensions = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'tif', 'webp', 'heic', 'heif'];
+      return acceptableExtensions.includes(extension);
+    });
+    
+    // Clear previous filtered files
+    const filteredContainer = document.getElementById('filtered-files-container');
+    filteredContainer.innerHTML = '';
+    
+    if (imageFiles.length > 0) {
+      filePreview.style.display = 'block';
+      fileList.innerHTML = '';
+      
+      // Create hidden file inputs for only the valid image files
+      imageFiles.forEach((file, index) => {
+        // Create the display item
+        const fileItem = document.createElement('div');
+        fileItem.className = 'file-item';
+        
+        const fileName = document.createElement('span');
+        fileName.className = 'file-name';
+        fileName.textContent = file.webkitRelativePath || file.name;
+        
+        const fileSize = document.createElement('span');
+        fileSize.className = 'file-size';
+        fileSize.textContent = formatFileSize(file.size);
+        
+        fileItem.appendChild(fileName);
+        fileItem.appendChild(fileSize);
+        fileList.appendChild(fileItem);
+        
+        // Create hidden file input for this specific file
+        const hiddenInput = document.createElement('input');
+        hiddenInput.type = 'file';
+        hiddenInput.name = `photos[][file]`;
+        hiddenInput.style.display = 'none';
+        
+        // Create a new FileList containing only this file
+        const dataTransfer = new DataTransfer();
+        dataTransfer.items.add(file);
+        hiddenInput.files = dataTransfer.files;
+        
+        filteredContainer.appendChild(hiddenInput);
+      });
+      
+      const totalFiles = files.length;
+      const skippedFiles = totalFiles - imageFiles.length;
+      
+      let countText = `${imageFiles.length} image file(s) found`;
+      if (skippedFiles > 0) {
+        countText += ` (${skippedFiles} non-image file(s) skipped)`;
+      }
+      fileCount.textContent = countText;
+      
+      importButton.disabled = false;
+    } else {
+      filePreview.style.display = 'none';
+      importButton.disabled = true;
+      
+      // Show message if files were selected but none were valid images
+      if (files.length > 0) {
+        fileCount.textContent = `No valid image files found in selected directory (${files.length} file(s) skipped)`;
+        filePreview.style.display = 'block';
+        fileList.innerHTML = '<p style="color: #666; font-style: italic;">No valid image files (.jpg, .png, .gif, .bmp, .tiff, .webp, .heic) found in the selected directory.</p>';
+      }
+    }
+  });
+  
+  function formatFileSize(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  }
+});
+</script>
