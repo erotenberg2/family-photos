@@ -85,6 +85,7 @@ ActiveAdmin.setup do |config|
     family_config.authentication_method = :authenticate_user!
     family_config.current_user_method = :current_user
     family_config.logout_link_path = :destroy_user_session_path
+    family_config.root_to = 'dashboard#index'
   end
 
   # == User Authorization

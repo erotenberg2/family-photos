@@ -3,8 +3,8 @@ Rails.application.routes.draw do
   devise_for :admin_users, ActiveAdmin::Devise.config
   ActiveAdmin.routes(self)
   
-  # User context for family management
-  devise_for :users
+  # User context for family management  
+  devise_for :users, ActiveAdmin::Devise.config.merge(path: 'family')
   
   # Family admin namespace routes
   namespace :family do
