@@ -38,7 +38,7 @@ ActiveAdmin.setup do |config|
   # Load paths for multiple Active Admin namespaces
   config.load_paths = [
     File.join(Rails.root, 'app', 'admin'),
-    File.join(Rails.root, 'app', 'user')
+    File.join(Rails.root, 'app', 'family')
   ]
 
   # == Default Namespace
@@ -79,12 +79,12 @@ ActiveAdmin.setup do |config|
   # within the application controller.
   config.authentication_method = :authenticate_admin_user!
   
-  # Configuration for User namespace
-  config.namespace :user do |user_config|
-    user_config.site_title = "Family Photos - User Admin"
-    user_config.authentication_method = :authenticate_user!
-    user_config.current_user_method = :current_user
-    user_config.logout_link_path = :destroy_user_admin_session_path
+  # Configuration for Family namespace
+  config.namespace :family do |family_config|
+    family_config.site_title = "Family Photos - Family Admin"
+    family_config.authentication_method = :authenticate_user!
+    family_config.current_user_method = :current_user
+    family_config.logout_link_path = :destroy_user_session_path
   end
 
   # == User Authorization
