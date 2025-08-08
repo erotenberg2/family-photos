@@ -23,5 +23,8 @@ module FamilyPhotos
     #
     # config.time_zone = "Central Time (US & Canada)"
     # config.eager_load_paths << Rails.root.join("extras")
+    
+    # Configure Active Storage to use mini_magick instead of vips
+    config.active_storage.variant_processor = :mini_magick
   end
 end

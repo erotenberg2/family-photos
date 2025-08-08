@@ -47,7 +47,7 @@ gem "image_processing", "~> 1.2"
 # Additional gems for family photo management
 gem "mini_magick" # Image processing
 gem "exifr" # EXIF data extraction from photos
-gem "ruby-vips" # HEIC support and better performance
+# gem "ruby-vips" # HEIC support and better performance - uncomment when vips is installed
 gem 'awesome_print'
 group :development, :test do
   # See https://guides.rubyonrails.org/debugging_rails_applications.html#debugging-with-the-debug-gem
