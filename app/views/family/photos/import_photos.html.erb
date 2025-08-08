@@ -241,62 +241,96 @@ document.addEventListener('DOMContentLoaded', function() {
     // Clear previous filtered files
     filteredContainer.innerHTML = '';
     
-    progressBar.style.width = '90%';
+    progressBar.style.width = '95%';
     progressText.textContent = 'Building file list...';
     
     if (imageFiles.length > 0) {
       fileList.innerHTML = '';
       
-      // Create hidden file inputs for only the valid image files
-      imageFiles.forEach((file, index) => {
-        // Create the display item
-        const fileItem = document.createElement('div');
-        fileItem.className = 'file-item';
-        
-        const fileName = document.createElement('span');
-        fileName.className = 'file-name';
-        fileName.textContent = file.webkitRelativePath || file.name;
-        
-        const fileSize = document.createElement('span');
-        fileSize.className = 'file-size';
-        fileSize.textContent = formatFileSize(file.size);
-        
-        fileItem.appendChild(fileName);
-        fileItem.appendChild(fileSize);
-        fileList.appendChild(fileItem);
-        
-        // Create hidden file input for this specific file
-        const hiddenInput = document.createElement('input');
-        hiddenInput.type = 'file';
-        hiddenInput.name = `photos[][file]`;
-        hiddenInput.style.display = 'none';
-        
-        // Create a new FileList containing only this file
-        const dataTransfer = new DataTransfer();
-        dataTransfer.items.add(file);
-        hiddenInput.files = dataTransfer.files;
-        
-        filteredContainer.appendChild(hiddenInput);
-      });
+      // Process DOM creation in batches to maintain responsiveness
+      const domBatchSize = 20; // Create 20 elements at a time
+      let processedFiles = 0;
       
-      const skippedFiles = totalFiles - imageFiles.length;
-      
-      let countText = `${imageFiles.length} image file(s) found`;
-      if (skippedFiles > 0) {
-        countText += ` (${skippedFiles} non-image file(s) skipped)`;
+      function createBatch(startIndex) {
+        const endIndex = Math.min(startIndex + domBatchSize, imageFiles.length);
+        const fragment = document.createDocumentFragment();
+        const hiddenFragment = document.createDocumentFragment();
+        
+        for (let i = startIndex; i < endIndex; i++) {
+          const file = imageFiles[i];
+          
+          // Create the display item
+          const fileItem = document.createElement('div');
+          fileItem.className = 'file-item';
+          
+          const fileName = document.createElement('span');
+          fileName.className = 'file-name';
+          fileName.textContent = file.webkitRelativePath || file.name;
+          
+          const fileSize = document.createElement('span');
+          fileSize.className = 'file-size';
+          fileSize.textContent = formatFileSize(file.size);
+          
+          fileItem.appendChild(fileName);
+          fileItem.appendChild(fileSize);
+          fragment.appendChild(fileItem);
+          
+          // Create hidden file input for this specific file
+          const hiddenInput = document.createElement('input');
+          hiddenInput.type = 'file';
+          hiddenInput.name = `photos[][file]`;
+          hiddenInput.style.display = 'none';
+          
+          // Create a new FileList containing only this file
+          const dataTransfer = new DataTransfer();
+          dataTransfer.items.add(file);
+          hiddenInput.files = dataTransfer.files;
+          
+          hiddenFragment.appendChild(hiddenInput);
+          processedFiles++;
+        }
+        
+        // Append batches to DOM
+        fileList.appendChild(fragment);
+        filteredContainer.appendChild(hiddenFragment);
+        
+        // Update progress
+        const buildProgress = (processedFiles / imageFiles.length) * 5 + 95; // 95-100%
+        progressBar.style.width = buildProgress + '%';
+        progressText.textContent = `Building list... (${processedFiles}/${imageFiles.length} files processed)`;
+        
+        if (endIndex < imageFiles.length) {
+          // Continue with next batch
+          requestAnimationFrame(() => createBatch(endIndex));
+        } else {
+          // Finished creating all elements
+          finishBuild();
+        }
       }
-      fileCount.textContent = countText;
       
-      // Complete progress
-      progressBar.style.width = '100%';
-      progressText.textContent = 'Scan complete!';
+      function finishBuild() {
+        const skippedFiles = totalFiles - imageFiles.length;
+        
+        let countText = `${imageFiles.length} image file(s) found`;
+        if (skippedFiles > 0) {
+          countText += ` (${skippedFiles} non-image file(s) skipped)`;
+        }
+        fileCount.textContent = countText;
+        
+        // Complete progress
+        progressBar.style.width = '100%';
+        progressText.textContent = 'Scan complete!';
+        
+        // Hide progress and show results
+        setTimeout(() => {
+          scanningProgress.style.display = 'none';
+          filePreview.style.display = 'block';
+          importButton.disabled = false;
+        }, 500);
+      }
       
-      // Hide progress and show results
-      setTimeout(() => {
-        scanningProgress.style.display = 'none';
-        filePreview.style.display = 'block';
-        importButton.disabled = false;
-      }, 500);
+      // Start building in batches
+      requestAnimationFrame(() => createBatch(0));
       
     } else {
       // No valid images found
