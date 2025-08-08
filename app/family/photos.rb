@@ -71,126 +71,96 @@ ActiveAdmin.register Photo, namespace: :family do
   filter :camera_model
   filter :content_type, as: :select, collection: %w[image/jpeg image/png image/gif image/bmp image/tiff image/heic image/heif]
   filter :created_at
-show do
-  panel "Photo Preview" do
-    if photo.thumbnail_path && File.exist?(photo.thumbnail_path)
-      image_tag("data:image/jpg;base64,#{Base64.encode64(File.read(photo.thumbnail_path))}", 
-                style: "max-width: 400px; max-height: 400px; object-fit: contain; border: 1px solid #ddd; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); display: block; margin: 0 auto;",
-                alt: photo.title || photo.original_filename)
-    else
-      div "Thumbnail not available", style: "padding: 40px; background: #f0f0f0; color: #666; border-radius: 8px; text-align: center;"
-    end
-  end
-
-end
 
   # Show page configuration
-  # show do
-  #   # Add CSS for hover effects
-  #   content_for :head do
-  #     raw <<~CSS
-  #       <style>
-  #         .photo-thumbnail-link:hover img {
-  #           box-shadow: 0 4px 12px rgba(0,0,0,0.2) !important;
-  #           transform: scale(1.02);
-  #         }
-  #         .photo-thumbnail-link img {
-  #           transition: all 0.3s ease !important;
-  #         }
-  #       </style>
-  #     CSS
-  #   end
+  show do
+    # Add CSS for hover effects
+    content_for :head do
+      raw <<~CSS
+        <style>
+          .photo-thumbnail-link:hover img {
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2) !important;
+            transform: scale(1.02);
+          }
+          .photo-thumbnail-link img {
+            transition: all 0.3s ease !important;
+          }
+        </style>
+      CSS
+    end
 
-  #   # Photo preview panel
-  #   panel "Photo Preview" do
-  #     div style: "text-align: center; margin: 20px 0;" do
-  #       div style: "padding: 20px; background: #f8f9fa; border-radius: 8px; margin-bottom: 15px;" do
-  #         div style: "margin-bottom: 10px; font-weight: bold;" do
-  #           "Photo: #{photo.title || photo.original_filename}"
-  #         end
-  #         div style: "margin-bottom: 15px; color: #6c757d;" do
-  #           "Dimensions: #{photo.width} x #{photo.height} | Size: #{photo.file_size_human}"
-  #         end
-          
-  #         # Provide working buttons
-  #         link_to "View Full Size Image", image_path(photo), target: "_blank", 
-  #                 class: "btn btn-primary", 
-  #                 style: "padding: 12px 20px; background: #0066cc; color: white; text-decoration: none; border-radius: 6px; display: inline-block; margin-right: 10px; font-weight: bold;"
-          
-  #         if photo.thumbnail_path && File.exist?(photo.thumbnail_path)
-  #           link_to "View Thumbnail", thumbnail_path(photo), target: "_blank",
-  #                   class: "btn btn-secondary",
-  #                   style: "padding: 12px 20px; background: #6c757d; color: white; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;"
-  #         end
-  #       end
-        
-  #       div style: "font-size: 12px; color: #6c757d; font-style: italic;" do
-  #         "Note: Images open in new windows due to ActiveAdmin limitations"
-  #       end
-  #     end
-  #   end
+    # Photo preview panel
+    panel "Photo Preview" do
+      if photo.thumbnail_path && File.exist?(photo.thumbnail_path)
+        link_to image_tag("data:image/jpg;base64,#{Base64.encode64(File.read(photo.thumbnail_path))}", 
+                  style: "max-width: 400px; max-height: 400px; object-fit: contain; border: 1px solid #ddd; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); display: block; margin: 0 auto;",
+                  alt: photo.title || photo.original_filename), image_path(photo), target: "_blank"
+      else
+        div "Thumbnail not available", style: "padding: 40px; background: #f0f0f0; color: #666; border-radius: 8px; text-align: center;"
+      end
+    end
 
-  #   attributes_table do
-  #     row :id
-  #     row :title
-  #     row :description
-  #     row :original_filename
-  #     row :file_path
-  #     row :content_type
-  #     row :file_size do |photo|
-  #       photo.file_size_human
-  #     end
-  #     row :dimensions do |photo|
-  #       "#{photo.width} × #{photo.height} pixels"
-  #     end
-  #     row :thumbnail_dimensions do |photo|
-  #       if photo.thumbnail_width && photo.thumbnail_height
-  #         "#{photo.thumbnail_width} × #{photo.thumbnail_height} pixels"
-  #       else
-  #         "Not generated"
-  #       end
-  #     end
-  #     row :taken_at
-  #     row :user
-  #     row :uploaded_by
-  #     row :camera_make
-  #     row :camera_model
-  #     row :location do |photo|
-  #       if photo.has_location?
-  #         "#{photo.latitude}, #{photo.longitude}"
-  #       else
-  #         "No location data"
-  #       end
-  #     end
-  #     row :md5_hash
-  #     row :created_at
-  #     row :updated_at
+    attributes_table do
+      row :id
+      row :title
+      row :description
+      row :original_filename
+      row :file_path
+      row :content_type
+      row :file_size do |photo|
+        photo.file_size_human
+      end
+      row :dimensions do |photo|
+        "#{photo.width} × #{photo.height} pixels"
+      end
+      row :thumbnail_dimensions do |photo|
+        if photo.thumbnail_width && photo.thumbnail_height
+          "#{photo.thumbnail_width} × #{photo.thumbnail_height} pixels"
+        else
+          "Not generated"
+        end
+      end
+      row :taken_at
+      row :user
+      row :uploaded_by
+      row :camera_make
+      row :camera_model
+      row :location do |photo|
+        if photo.has_location?
+          "#{photo.latitude}, #{photo.longitude}"
+        else
+          "No location data"
+        end
+      end
+      row :md5_hash
+      row :created_at
+      row :updated_at
       
-  #     row :albums do |photo|
-  #       photo.albums.map(&:title).join(", ")
-  #     end
-  #   end
+      row :albums do |photo|
+        photo.albums.map(&:title).join(", ")
+      end
+    end
 
-  #   panel "EXIF Data" do
-  #     if photo.exif_data.present?
-  #       div do
-  #         h4 "Formatted EXIF Data"
-  #         pre JsonFormatterService.pretty_format(photo.exif_data), 
-  #             style: "background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace; font-size: 12px; line-height: 1.4; border: 1px solid #e0e0e0; white-space: pre-wrap;"
-  #       end
+    panel "EXIF Data" do
+      if photo.exif_data.present?
+        div do
+          h4 "Formatted EXIF Data"
+          pre JsonFormatterService.pretty_format(photo.exif_data), 
+              style: "background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace; font-size: 12px; line-height: 1.4; border: 1px solid #e0e0e0; white-space: pre-wrap;"
+        end
         
-  #       div style: "margin-top: 20px;" do
-  #         h4 "EXIF Properties Table"
-  #         table_for photo.exif_data.to_a do
-  #           column("Property") { |item| item[0] }
-  #           column("Value") { |item| item[1] }
-  #         end
-  #       end
-  #     else
-  #       "No EXIF data available"
-  #     end
-  #   end
-  # end
+        div style: "margin-top: 20px;" do
+          h4 "EXIF Properties Table"
+          table_for photo.exif_data.to_a do
+            column("Property") { |item| item[0] }
+            column("Value") { |item| item[1] }
+          end
+        end
+      else
+        "No EXIF data available"
+      end
+    end
+  end
 
   # Form configuration
   form do |f|
