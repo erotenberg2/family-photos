@@ -1,4 +1,8 @@
 Rails.application.routes.draw do
+  # Sidekiq Web UI
+  require 'sidekiq/web'
+  mount Sidekiq::Web => '/sidekiq'
+  
   # Admin context for AdminUsers (technical/system admin)
   devise_for :admin_users, ActiveAdmin::Devise.config
   ActiveAdmin.routes(self)

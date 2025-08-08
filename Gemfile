@@ -49,6 +49,13 @@ gem "mini_magick" # Image processing
 gem "exifr" # EXIF data extraction from photos
 # gem "ruby-vips" # HEIC support and better performance - uncomment when vips is installed
 gem 'awesome_print'
+
+# Background job processing
+gem 'sidekiq'
+gem 'redis'
+
+# Process management
+gem 'foreman'
 group :development, :test do
   # See https://guides.rubyonrails.org/debugging_rails_applications.html#debugging-with-the-debug-gem
   gem "debug", platforms: %i[ mri windows ], require: "debug/prelude"

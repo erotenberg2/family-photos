@@ -28,6 +28,16 @@
         <div id="filtered-files-container" style="display: none;"></div>
       </div>
       
+      <!-- Scanning progress indicator -->
+      <div id="scanning-progress" style="margin: 20px 0; display: none;">
+        <h4>Scanning Directory...</h4>
+        <div style="background: #f0f0f0; border-radius: 10px; padding: 3px; margin: 10px 0;">
+          <div id="progress-bar" style="background: #007cba; height: 20px; border-radius: 8px; width: 0%; transition: width 0.3s ease;"></div>
+        </div>
+        <p id="progress-text" style="font-size: 14px; color: #666; margin: 5px 0;">Preparing to scan files...</p>
+        <p style="font-size: 12px; color: #999;">Please wait while we process the directory contents.</p>
+      </div>
+
       <div id="file-preview" style="margin: 20px 0; display: none;">
         <h4>Files to Import:</h4>
         <div id="file-list" style="max-height: 300px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; background: #f9f9f9;">
@@ -126,41 +136,115 @@ document.addEventListener('DOMContentLoaded', function() {
   const fileCount = document.getElementById('file-count');
   const importButton = document.getElementById('import-button');
   
+  // Show progress immediately when directory input is clicked
+  directoryInput.addEventListener('click', function(e) {
+    const scanningProgress = document.getElementById('scanning-progress');
+    const progressBar = document.getElementById('progress-bar');
+    const progressText = document.getElementById('progress-text');
+    
+    // Show progress immediately
+    scanningProgress.style.display = 'block';
+    filePreview.style.display = 'none';
+    importButton.disabled = true;
+    
+    progressBar.style.width = '5%';
+    progressText.textContent = 'Reading directory structure...';
+  });
+
   directoryInput.addEventListener('change', function(e) {
-    const files = Array.from(e.target.files);
+    const scanningProgress = document.getElementById('scanning-progress');
+    const progressBar = document.getElementById('progress-bar');
+    const progressText = document.getElementById('progress-text');
     
-    // Define acceptable image MIME types
-    const acceptableImageTypes = [
-      'image/jpeg',
-      'image/jpg', 
-      'image/png',
-      'image/gif',
-      'image/bmp',
-      'image/tiff',
-      'image/webp',
-      'image/heic',
-      'image/heif'
-    ];
+    // Keep progress visible and update
+    progressBar.style.width = '15%';
+    progressText.textContent = 'Directory loaded, analyzing files...';
     
-    // Filter files to only include acceptable image types
-    const imageFiles = files.filter(file => {
-      // Check MIME type
-      if (acceptableImageTypes.includes(file.type.toLowerCase())) {
-        return true;
+    // Use requestAnimationFrame to ensure UI updates
+    requestAnimationFrame(() => {
+      const files = Array.from(e.target.files);
+      
+      if (files.length === 0) {
+        scanningProgress.style.display = 'none';
+        return;
       }
       
-      // Fallback: check file extension for cases where MIME type might not be set
-      const extension = file.name.toLowerCase().split('.').pop();
-      const acceptableExtensions = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'tif', 'webp', 'heic', 'heif'];
-      return acceptableExtensions.includes(extension);
+      progressText.textContent = `Analyzing ${files.length} files...`;
+      progressBar.style.width = '20%';
+      
+      // Define acceptable image MIME types
+      const acceptableImageTypes = [
+        'image/jpeg',
+        'image/jpg', 
+        'image/png',
+        'image/gif',
+        'image/bmp',
+        'image/tiff',
+        'image/webp',
+        'image/heic',
+        'image/heif'
+      ];
+      
+      // Process files in smaller batches with faster updates
+      const imageFiles = [];
+      const batchSize = 25; // Smaller batches for more responsive updates
+      let processedCount = 0;
+      
+      function processBatch(startIndex) {
+        const endIndex = Math.min(startIndex + batchSize, files.length);
+        const startTime = performance.now();
+        
+        for (let i = startIndex; i < endIndex; i++) {
+          const file = files[i];
+          
+          // Quick check - just extension for speed
+          const extension = file.name.toLowerCase().split('.').pop();
+          const acceptableExtensions = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'tif', 'webp', 'heic', 'heif'];
+          
+          if (acceptableExtensions.includes(extension)) {
+            imageFiles.push(file);
+          }
+          
+          processedCount++;
+          
+          // Break if processing is taking too long (>5ms)
+          if (performance.now() - startTime > 5) {
+            break;
+          }
+        }
+        
+        // Update progress more smoothly
+        const progress = Math.min((processedCount / files.length) * 75 + 20, 95); // 20-95%
+        progressBar.style.width = progress + '%';
+        progressText.textContent = `Processed ${processedCount} of ${files.length} files... (${imageFiles.length} images found)`;
+        
+        if (processedCount < files.length) {
+          // Continue processing next batch immediately
+          requestAnimationFrame(() => processBatch(processedCount));
+        } else {
+          // Finished processing all files
+          requestAnimationFrame(() => buildFileList(imageFiles, files.length));
+        }
+      }
+      
+      // Start processing with a small delay to show the updated progress
+      setTimeout(() => processBatch(0), 50);
     });
+  });
+  
+  function buildFileList(imageFiles, totalFiles) {
+    const scanningProgress = document.getElementById('scanning-progress');
+    const progressBar = document.getElementById('progress-bar');
+    const progressText = document.getElementById('progress-text');
+    const filteredContainer = document.getElementById('filtered-files-container');
     
     // Clear previous filtered files
-    const filteredContainer = document.getElementById('filtered-files-container');
     filteredContainer.innerHTML = '';
     
+    progressBar.style.width = '90%';
+    progressText.textContent = 'Building file list...';
+    
     if (imageFiles.length > 0) {
-      filePreview.style.display = 'block';
       fileList.innerHTML = '';
       
       // Create hidden file inputs for only the valid image files
@@ -195,7 +279,6 @@ document.addEventListener('DOMContentLoaded', function() {
         filteredContainer.appendChild(hiddenInput);
       });
       
-      const totalFiles = files.length;
       const skippedFiles = totalFiles - imageFiles.length;
       
       let countText = `${imageFiles.length} image file(s) found`;
@@ -204,19 +287,32 @@ document.addEventListener('DOMContentLoaded', function() {
       }
       fileCount.textContent = countText;
       
-      importButton.disabled = false;
-    } else {
-      filePreview.style.display = 'none';
-      importButton.disabled = true;
+      // Complete progress
+      progressBar.style.width = '100%';
+      progressText.textContent = 'Scan complete!';
       
-      // Show message if files were selected but none were valid images
-      if (files.length > 0) {
-        fileCount.textContent = `No valid image files found in selected directory (${files.length} file(s) skipped)`;
+      // Hide progress and show results
+      setTimeout(() => {
+        scanningProgress.style.display = 'none';
         filePreview.style.display = 'block';
-        fileList.innerHTML = '<p style="color: #666; font-style: italic;">No valid image files (.jpg, .png, .gif, .bmp, .tiff, .webp, .heic) found in the selected directory.</p>';
-      }
+        importButton.disabled = false;
+      }, 500);
+      
+    } else {
+      // No valid images found
+      fileCount.textContent = `No valid image files found in selected directory (${totalFiles} file(s) skipped)`;
+      fileList.innerHTML = '<p style="color: #666; font-style: italic;">No valid image files (.jpg, .png, .gif, .bmp, .tiff, .webp, .heic) found in the selected directory.</p>';
+      
+      progressBar.style.width = '100%';
+      progressText.textContent = 'Scan complete - no images found.';
+      
+      setTimeout(() => {
+        scanningProgress.style.display = 'none';
+        filePreview.style.display = 'block';
+        importButton.disabled = true;
+      }, 500);
     }
-  });
+  }
   
   function formatFileSize(bytes) {
     if (bytes === 0) return '0 Bytes';

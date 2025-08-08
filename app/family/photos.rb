@@ -194,94 +194,44 @@ ActiveAdmin.register Photo, namespace: :family do
   # Collection actions
   collection_action :import_photos, method: [:get, :post] do
     if request.post?
-      # Handle the photo import
-      imported_count = 0
-      errors = []
-      
+      # Handle the photo import using background job
       if params[:photos].present?
+        # Save uploaded files to temporary location and prepare data for the job
+        uploaded_files_data = []
+        temp_dir = Rails.root.join('tmp', 'photo_uploads')
+        FileUtils.mkdir_p(temp_dir) unless Dir.exist?(temp_dir)
+        
         params[:photos].each do |photo_param|
-          begin
-            # Process each uploaded file
-            file = photo_param[:file]
-            next unless file.present?
-            
-            # Validate it's an image
-            unless file.content_type.start_with?('image/')
-              errors << "#{file.original_filename}: Not a valid image file"
-              next
-            end
-            
-            # Generate unique file path
-            timestamp = Time.current.strftime("%Y%m%d_%H%M%S")
-            random_suffix = SecureRandom.hex(4)
-            file_extension = File.extname(file.original_filename)
-            stored_filename = "#{timestamp}_#{random_suffix}#{file_extension}"
-            
-            # Create upload directory if it doesn't exist
-            upload_dir = Rails.root.join('storage', 'photos')
-            FileUtils.mkdir_p(upload_dir) unless Dir.exist?(upload_dir)
-            
-            # Full file path
-            file_path = upload_dir.join(stored_filename).to_s
-            
-            # Save file to disk
-            File.open(file_path, 'wb') do |f|
-              f.write(file.read)
-            end
-            
-            # Calculate MD5 hash
-            md5_hash = Digest::MD5.file(file_path).hexdigest
-            
-            # Check for duplicates
-            existing_photo = Photo.find_by(md5_hash: md5_hash)
-            if existing_photo
-              File.delete(file_path) # Clean up duplicate file
-              errors << "#{file.original_filename}: Duplicate photo already exists"
-              next
-            end
-            
-            # Extract image dimensions using MiniMagick
-            require 'mini_magick'
-            image = MiniMagick::Image.open(file_path)
-            width = image.width
-            height = image.height
-            
-            # Create Photo record
-            photo = Photo.new(
-              title: File.basename(file.original_filename, '.*').humanize,
-              original_filename: file.original_filename,
-              content_type: file.content_type,
-              file_size: file.size,
-              file_path: file_path,
-              md5_hash: md5_hash,
-              width: width,
-              height: height,
-              uploaded_by: current_user,
-              user: current_user
-            )
-            
-            if photo.save
-              imported_count += 1
-            else
-              # Clean up file if photo creation failed
-              File.delete(file_path) if File.exist?(file_path)
-              errors << "#{file.original_filename}: #{photo.errors.full_messages.join(', ')}"
-            end
-            
-          rescue => e
-            # Clean up file if processing failed
-            File.delete(file_path) if defined?(file_path) && File.exist?(file_path)
-            errors << "#{file&.original_filename || 'Unknown file'}: #{e.message}"
+          file = photo_param[:file]
+          next unless file.present?
+          
+          # Save to temporary file
+          temp_filename = "#{SecureRandom.hex(16)}_#{file.original_filename}"
+          temp_path = temp_dir.join(temp_filename)
+          
+          File.open(temp_path, 'wb') do |f|
+            f.write(file.read)
           end
+          
+          # Store JSON-safe file data
+          uploaded_files_data << {
+            'original_filename' => file.original_filename,
+            'content_type' => file.content_type,
+            'temp_path' => temp_path.to_s,
+            'size' => file.size
+          }
         end
-      end
-      
-      if imported_count > 0
-        flash[:notice] = "Successfully imported #{imported_count} photo(s)."
-      end
-      
-      if errors.any?
-        flash[:error] = "Errors encountered:\n#{errors.join("\n")}"
+        
+        if uploaded_files_data.any?
+          # Enqueue the background job
+          job = PhotoImportJob.perform_async(uploaded_files_data, current_user.id)
+          
+          flash[:notice] = "Photo import started! #{uploaded_files_data.length} file(s) are being processed in the background. You can monitor progress at /sidekiq"
+        else
+          flash[:error] = "No valid files selected for import."
+        end
+      else
+        flash[:error] = "No files selected for import."
       end
       
       redirect_to family_photos_path
