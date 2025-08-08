@@ -355,5 +355,158 @@ document.addEventListener('DOMContentLoaded', function() {
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   }
+  
+  // Form submission handling with chunked uploads
+  document.getElementById('import-photos-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+    
+    const filteredContainer = document.getElementById('filtered-files-container');
+    const hiddenInputs = filteredContainer.querySelectorAll('input[type="file"]');
+    
+    if (hiddenInputs.length === 0) {
+      alert('No files selected for import.');
+      return;
+    }
+    
+    // Convert NodeList to Array and get files
+    const filesToUpload = Array.from(hiddenInputs)
+      .map(input => input.files && input.files.length > 0 ? input.files[0] : null)
+      .filter(file => file !== null);
+    
+    if (filesToUpload.length === 0) {
+      alert('No valid files to upload.');
+      return;
+    }
+    
+    // Start chunked upload
+    startChunkedUpload(filesToUpload);
+  });
+  
+  function startChunkedUpload(files) {
+    const chunkSize = 15; // Upload 15 files at a time
+    const totalFiles = files.length;
+    let currentChunk = 0;
+    let uploadedCount = 0;
+    let errorCount = 0;
+    
+    // Show upload progress
+    showUploadProgress();
+    
+    function uploadChunk(startIndex) {
+      const endIndex = Math.min(startIndex + chunkSize, totalFiles);
+      const chunkFiles = files.slice(startIndex, endIndex);
+      const chunkNumber = Math.floor(startIndex / chunkSize) + 1;
+      const totalChunks = Math.ceil(totalFiles / chunkSize);
+      
+      updateUploadProgress(uploadedCount, totalFiles, `Uploading batch ${chunkNumber} of ${totalChunks}...`);
+      
+      const formData = new FormData();
+      
+      // Add files to form data
+      chunkFiles.forEach(file => {
+        formData.append('photos[][file]', file);
+      });
+      
+      // Add CSRF token
+      const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+      formData.append('authenticity_token', csrfToken);
+      
+      // Upload this chunk
+      fetch('/family/photos/import_photos', {
+        method: 'POST',
+        body: formData
+      }).then(response => {
+        if (response.ok) {
+          uploadedCount += chunkFiles.length;
+          updateUploadProgress(uploadedCount, totalFiles, `Batch ${chunkNumber} completed`);
+          
+          // Upload next chunk
+          if (endIndex < totalFiles) {
+            setTimeout(() => uploadChunk(endIndex), 500); // Small delay between chunks
+          } else {
+            // All chunks uploaded
+            finishUpload(uploadedCount, errorCount);
+          }
+        } else {
+          errorCount += chunkFiles.length;
+          console.error(`Chunk ${chunkNumber} failed:`, response.statusText);
+          
+          // Continue with next chunk even if this one failed
+          if (endIndex < totalFiles) {
+            setTimeout(() => uploadChunk(endIndex), 500);
+          } else {
+            finishUpload(uploadedCount, errorCount);
+          }
+        }
+      }).catch(error => {
+        errorCount += chunkFiles.length;
+        console.error(`Chunk ${chunkNumber} error:`, error);
+        
+        // Continue with next chunk even if this one failed
+        if (endIndex < totalFiles) {
+          setTimeout(() => uploadChunk(endIndex), 500);
+        } else {
+          finishUpload(uploadedCount, errorCount);
+        }
+      });
+    }
+    
+    // Start uploading
+    uploadChunk(0);
+  }
+  
+  function showUploadProgress() {
+    // Hide file preview and show upload progress
+    document.getElementById('file-preview').style.display = 'none';
+    
+    // Create upload progress UI
+    const uploadProgress = document.createElement('div');
+    uploadProgress.id = 'upload-progress';
+    uploadProgress.innerHTML = `
+      <div style="background: #f9f9f9; padding: 20px; border-radius: 8px; margin: 20px 0;">
+        <h3 style="margin: 0 0 15px 0; color: #333;">Uploading Photos...</h3>
+        <div style="background: #e0e0e0; border-radius: 10px; overflow: hidden; height: 20px; margin-bottom: 10px;">
+          <div id="upload-progress-bar" style="background: linear-gradient(90deg, #4CAF50, #45a049); height: 100%; width: 0%; transition: width 0.3s ease;"></div>
+        </div>
+        <div id="upload-progress-text" style="color: #666; font-size: 14px;">Preparing upload...</div>
+      </div>
+    `;
+    
+    // Insert after the form
+    const form = document.getElementById('import-photos-form');
+    form.insertAdjacentElement('afterend', uploadProgress);
+    
+    // Disable form
+    form.style.opacity = '0.5';
+    form.style.pointerEvents = 'none';
+  }
+  
+  function updateUploadProgress(uploaded, total, message) {
+    const progressBar = document.getElementById('upload-progress-bar');
+    const progressText = document.getElementById('upload-progress-text');
+    
+    if (progressBar && progressText) {
+      const percentage = (uploaded / total) * 100;
+      progressBar.style.width = percentage + '%';
+      progressText.textContent = `${message} (${uploaded}/${total} files uploaded - ${Math.round(percentage)}%)`;
+    }
+  }
+  
+  function finishUpload(uploadedCount, errorCount) {
+    const progressText = document.getElementById('upload-progress-text');
+    
+    if (progressText) {
+      if (errorCount > 0) {
+        progressText.innerHTML = `Upload completed with some errors.<br>Successfully uploaded: ${uploadedCount} files<br>Failed: ${errorCount} files<br><em>Refreshing page...</em>`;
+      } else {
+        progressText.innerHTML = `All files uploaded successfully!<br>${uploadedCount} files processed<br><em>Refreshing page...</em>`;
+      }
+    }
+    
+    // Refresh page after a delay
+    setTimeout(() => {
+      window.location.reload();
+    }, 2000);
+  }
 });
 </script>

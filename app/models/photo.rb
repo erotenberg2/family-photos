@@ -81,41 +81,56 @@ class Photo < ApplicationRecord
     
     begin
       image = MiniMagick::Image.open(file_path)
+      
+      # Get ALL EXIF data at once using the bulk method
+      # This avoids the warnings from trying to access non-existent properties
       exif_data = {}
       
-      # Extract common EXIF properties from HEIC
-      exif_data['Make'] = image['exif:Make'] if image['exif:Make']
-      exif_data['Model'] = image['exif:Model'] if image['exif:Model'] 
-      exif_data['DateTimeOriginal'] = image['exif:DateTimeOriginal'] if image['exif:DateTimeOriginal']
-      exif_data['Artist'] = image['exif:Artist'] if image['exif:Artist']
-      exif_data['Copyright'] = image['exif:Copyright'] if image['exif:Copyright']
-      exif_data['Software'] = image['exif:Software'] if image['exif:Software']
-      exif_data['HostComputer'] = image['exif:HostComputer'] if image['exif:HostComputer']
-      exif_data['CameraOwnerName'] = image['exif:CameraOwnerName'] if image['exif:CameraOwnerName']
-      exif_data['LensMake'] = image['exif:LensMake'] if image['exif:LensMake']
-      exif_data['LensModel'] = image['exif:LensModel'] if image['exif:LensModel']
-      
-      # GPS data
-      exif_data['GPSLatitude'] = image['exif:GPSLatitude'] if image['exif:GPSLatitude']
-      exif_data['GPSLongitude'] = image['exif:GPSLongitude'] if image['exif:GPSLongitude']
-      exif_data['GPSLatitudeRef'] = image['exif:GPSLatitudeRef'] if image['exif:GPSLatitudeRef']
-      exif_data['GPSLongitudeRef'] = image['exif:GPSLongitudeRef'] if image['exif:GPSLongitudeRef']
-      
-      # Camera settings
-      exif_data['FNumber'] = image['exif:FNumber'] if image['exif:FNumber']
-      exif_data['ExposureTime'] = image['exif:ExposureTime'] if image['exif:ExposureTime']
-      exif_data['ISOSpeedRatings'] = image['exif:ISOSpeedRatings'] if image['exif:ISOSpeedRatings']
-      exif_data['FocalLength'] = image['exif:FocalLength'] if image['exif:FocalLength']
-      exif_data['Flash'] = image['exif:Flash'] if image['exif:Flash']
-      exif_data['WhiteBalance'] = image['exif:WhiteBalance'] if image['exif:WhiteBalance']
-      exif_data['Orientation'] = image['exif:Orientation'] if image['exif:Orientation']
-      
-      # Try to get all EXIF data at once
       begin
+        # Use image.exif to get all available EXIF data without warnings
         all_exif = image.exif
-        exif_data.merge!(all_exif) if all_exif.is_a?(Hash)
-      rescue
-        # Fallback if bulk EXIF extraction fails
+        exif_data = all_exif if all_exif.is_a?(Hash)
+      rescue => e
+        Rails.logger.debug "Bulk EXIF extraction failed for #{file_path}, trying identify method: #{e.message}"
+        
+        # Fallback: use identify command to get EXIF data
+        begin
+          # Get raw EXIF output from identify command
+          result = image.run_command("identify", "-format", "%[EXIF:*]", image.path)
+          
+          # Parse the EXIF output manually if needed
+          if result && !result.empty?
+            # This gets a text dump of all EXIF data
+            # Parse it into a hash structure
+            lines = result.split("\n")
+            lines.each do |line|
+              if line.include?("=")
+                key, value = line.split("=", 2)
+                key = key.strip.gsub(/^exif:/, '') # Remove exif: prefix
+                exif_data[key] = value.strip unless value.nil? || value.strip.empty?
+              end
+            end
+          end
+        rescue => identify_error
+          Rails.logger.debug "Identify EXIF extraction also failed for #{file_path}: #{identify_error.message}"
+        end
+      end
+      
+      # If we still don't have data, try the safe property access method
+      # but only for essential fields and with proper error handling
+      if exif_data.empty?
+        Rails.logger.debug "Trying safe property access for #{file_path}"
+        safe_exif_fields = %w[Make Model DateTimeOriginal]
+        
+        safe_exif_fields.each do |field|
+          begin
+            value = image["exif:#{field}"]
+            exif_data[field] = value if value && !value.empty?
+          rescue => field_error
+            # Silently skip fields that don't exist or cause errors
+            Rails.logger.debug "Skipping EXIF field #{field} for #{file_path}: #{field_error.message}"
+          end
+        end
       end
       
       exif_data.compact
