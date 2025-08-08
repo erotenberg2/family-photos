@@ -10,6 +10,10 @@ Rails.application.routes.draw do
   namespace :family do
     ActiveAdmin.routes(self)
   end
+  
+  # Image serving routes
+  resources :images, only: [:show]
+  get 'thumbnails/:id', to: 'images#thumbnail', as: 'thumbnail'
   # Define your application routes per the DSL in https://guides.rubyonrails.org/routing.html
 
   # Reveal health status on /up that returns 200 if the app boots with no exceptions, otherwise 500.

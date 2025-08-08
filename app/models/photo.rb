@@ -247,20 +247,48 @@ class Photo < ApplicationRecord
   end
 
   def generate_thumbnail
-    return unless file_path.present?
+    return unless file_path.present? && File.exist?(file_path)
     
-    thumbnail_size = calculate_thumbnail_size
-    self.thumbnail_width = thumbnail_size[:width]
-    self.thumbnail_height = thumbnail_size[:height]
-    self.thumbnail_path = generate_thumbnail_path
-    
-    # Create thumbnail directory if it doesn't exist
-    thumbnail_dir = File.dirname(thumbnail_path)
-    FileUtils.mkdir_p(thumbnail_dir) unless Dir.exist?(thumbnail_dir)
-    
-    # Generate thumbnail using ImageProcessing
-    # This will be implemented when you're ready to process actual images
-    
-    save if changed?
+    begin
+      thumbnail_size = calculate_thumbnail_size
+      self.thumbnail_width = thumbnail_size[:width]
+      self.thumbnail_height = thumbnail_size[:height]
+      self.thumbnail_path = generate_thumbnail_path
+      
+      # Create thumbnail directory if it doesn't exist
+      thumbnail_dir = File.dirname(thumbnail_path)
+      FileUtils.mkdir_p(thumbnail_dir) unless Dir.exist?(thumbnail_dir)
+      
+      # Generate thumbnail using MiniMagick
+      require 'mini_magick'
+      
+      # Open the original image
+      image = MiniMagick::Image.open(file_path)
+      
+      # Resize to thumbnail dimensions while maintaining aspect ratio
+      image.resize "#{thumbnail_size[:width]}x#{thumbnail_size[:height]}>"
+      
+      # Convert HEIC to JPEG for better browser compatibility
+      if content_type&.include?('heic') || content_type&.include?('heif')
+        # Change extension to .jpg for HEIC files
+        self.thumbnail_path = thumbnail_path.gsub(/\.(heic|heif)$/i, '.jpg')
+        image.format 'jpg'
+      end
+      
+      # Write the thumbnail file
+      image.write(thumbnail_path)
+      
+      Rails.logger.info "Generated thumbnail: #{thumbnail_path}"
+      
+      save if changed?
+      
+    rescue => e
+      Rails.logger.error "Failed to generate thumbnail for #{file_path}: #{e.message}"
+      # Clear thumbnail fields on failure
+      self.thumbnail_path = nil
+      self.thumbnail_width = nil
+      self.thumbnail_height = nil
+      save if changed?
+    end
   end
 end
