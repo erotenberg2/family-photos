@@ -13,6 +13,7 @@ Rails.application.routes.draw do
   # Family admin namespace routes
   namespace :family do
     ActiveAdmin.routes(self)
+    get 'job_status', to: 'job_status#index'
   end
   
   # Image serving routes
