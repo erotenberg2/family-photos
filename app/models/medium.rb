@@ -1,0 +1,288 @@
+class Medium < ApplicationRecord
+  belongs_to :mediable, polymorphic: true
+  belongs_to :uploaded_by, class_name: 'User'
+  belongs_to :user
+  
+  # Enum for medium types
+  enum :medium_type, {
+    photo: 'photo',
+    audio: 'audio', 
+    video: 'video'
+  }
+  
+  # Validations for generic media attributes
+  validates :file_path, presence: true, uniqueness: true
+  validates :md5_hash, presence: true, uniqueness: true
+  validates :file_size, presence: true, numericality: { greater_than: 0 }
+  validates :original_filename, presence: true
+  validates :content_type, presence: true
+  validates :medium_type, presence: true
+  
+  # Content type validation based on medium type
+  validates :content_type, inclusion: {
+    in: ->(medium) { 
+      case medium.medium_type
+      when 'photo'
+        %w[image/jpeg image/jpg image/png image/gif image/bmp image/tiff image/heic image/heif]
+      when 'audio'
+        %w[audio/mpeg audio/mp3 audio/wav audio/aac audio/ogg audio/flac]
+      when 'video'
+        %w[video/mp4 video/mov video/avi video/mkv video/webm]
+      else
+        []
+      end
+    },
+    message: 'must be a valid format for the medium type'
+  }
+
+  def self.ransackable_attributes(auth_object = nil)
+    ["content_type", "created_at", "file_path", "file_size", "height", "id", 
+     "md5_hash", "medium_type", "original_filename", "taken_at", "updated_at", 
+     "uploaded_by_id", "user_id", "width"]
+  end
+
+  def self.ransackable_associations(auth_object = nil)
+    ["mediable", "uploaded_by", "user"]
+  end
+
+  # Scopes
+  scope :by_date, -> { order(:taken_at, :created_at) }
+  scope :recent, -> { order(created_at: :desc) }
+  scope :by_type, ->(type) { where(medium_type: type) }
+  scope :photos, -> { where(medium_type: 'photo') }
+  scope :audio, -> { where(medium_type: 'audio') }
+  scope :video, -> { where(medium_type: 'video') }
+
+  # Class methods
+  def self.duplicate_by_hash(hash)
+    find_by(md5_hash: hash)
+  end
+
+  def self.total_storage_size
+    sum(:file_size)
+  end
+
+  # Instance methods
+  def file_size_human
+    return '0 B' if file_size.nil? || file_size.zero?
+    
+    units = %w[B KB MB GB TB]
+    size = file_size.to_f
+    unit_index = 0
+    
+    while size >= 1024 && unit_index < units.length - 1
+      size /= 1024
+      unit_index += 1
+    end
+    
+    "#{size.round(1)} #{units[unit_index]}"
+  end
+
+  def taken_date
+    taken_at || created_at
+  end
+
+  # Delegate methods to mediable object for convenience
+  def title
+    mediable&.title
+  end
+
+  def description  
+    mediable&.description
+  end
+  
+  # Check if file exists
+  def file_exists?
+    file_path.present? && File.exist?(file_path)
+  end
+
+  # Class method to create medium from uploaded file
+  def self.create_from_uploaded_file(uploaded_file, user, medium_type = nil)
+    # Determine medium type if not specified
+    medium_type ||= determine_medium_type_from_content_type(uploaded_file.content_type)
+    
+    return nil unless medium_type
+    
+    # Generate unique file path
+    timestamp = Time.current.strftime("%Y%m%d_%H%M%S")
+    random_suffix = SecureRandom.hex(4)
+    file_extension = File.extname(uploaded_file.original_filename)
+    stored_filename = "#{timestamp}_#{random_suffix}#{file_extension}"
+    
+    # Create upload directory based on medium type
+    upload_dir = Rails.root.join('storage', medium_type.pluralize)
+    FileUtils.mkdir_p(upload_dir) unless Dir.exist?(upload_dir)
+    
+    # Full file path
+    file_path = upload_dir.join(stored_filename).to_s
+    
+    # Save file to disk
+    save_uploaded_file_to_path(uploaded_file, file_path)
+    
+    # Calculate MD5 hash
+    md5_hash = Digest::MD5.file(file_path).hexdigest
+    
+    # Check for duplicates
+    existing_medium = find_by(md5_hash: md5_hash)
+    if existing_medium
+      File.delete(file_path) # Clean up duplicate file
+      return { error: "Duplicate file already exists", existing: existing_medium }
+    end
+    
+    # Extract dimensions for images/videos
+    width, height = extract_dimensions(file_path, uploaded_file.content_type)
+    
+    # Create the specific media type record first
+    mediable = create_mediable_record(medium_type, uploaded_file, user)
+    return { error: "Failed to create #{medium_type} record" } unless mediable
+    
+    # Create Medium record
+    medium = new(
+      file_path: file_path,
+      file_size: File.size(file_path),
+      original_filename: uploaded_file.original_filename,
+      content_type: uploaded_file.content_type,
+      md5_hash: md5_hash,
+      width: width,
+      height: height,
+      medium_type: medium_type,
+      mediable: mediable,
+      uploaded_by: user,
+      user: user
+    )
+    
+    if medium.save
+      # The mediable association is already set in the medium creation above
+      
+      # Process type-specific metadata
+      process_medium_metadata(medium)
+      { success: true, medium: medium }
+    else
+      # Clean up files if creation failed
+      File.delete(file_path) if File.exist?(file_path)
+      mediable.destroy if mediable
+      { error: medium.errors.full_messages.join(', ') }
+    end
+  end
+  
+  # Determine medium type from content type
+  def self.determine_medium_type_from_content_type(content_type)
+    return nil unless content_type
+    
+    case content_type.downcase
+    when /^image\//
+      'photo'
+    when /^audio\//
+      'audio'
+    when /^video\//
+      'video'
+    else
+      nil
+    end
+  end
+  
+  # Filter files by acceptable types for import
+  def self.filter_acceptable_files(files, allowed_types = ['all'])
+    return [] if files.empty?
+    
+    acceptable_types = {}
+    
+    if allowed_types.include?('all') || allowed_types.include?('photo')
+      acceptable_types.merge!({
+        'image/jpeg' => 'photo', 'image/jpg' => 'photo', 'image/png' => 'photo',
+        'image/gif' => 'photo', 'image/bmp' => 'photo', 'image/tiff' => 'photo',
+        'image/heic' => 'photo', 'image/heif' => 'photo', 'image/webp' => 'photo'
+      })
+    end
+    
+    if allowed_types.include?('all') || allowed_types.include?('audio')
+      acceptable_types.merge!({
+        'audio/mpeg' => 'audio', 'audio/mp3' => 'audio', 'audio/wav' => 'audio',
+        'audio/aac' => 'audio', 'audio/ogg' => 'audio', 'audio/flac' => 'audio'
+      })
+    end
+    
+    if allowed_types.include?('all') || allowed_types.include?('video')
+      acceptable_types.merge!({
+        'video/mp4' => 'video', 'video/mov' => 'video', 'video/avi' => 'video',
+        'video/mkv' => 'video', 'video/webm' => 'video'
+      })
+    end
+    
+    # Filter files and return with their determined types
+    files.filter_map do |file|
+      content_type = file.content_type&.downcase
+      medium_type = acceptable_types[content_type]
+      
+      # Fallback to file extension if content type detection fails
+      unless medium_type
+        extension = File.extname(file.original_filename).downcase
+        medium_type = case extension
+                     when '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif', '.heic', '.heif', '.webp'
+                       'photo' if allowed_types.include?('all') || allowed_types.include?('photo')
+                     when '.mp3', '.wav', '.aac', '.ogg', '.flac', '.m4a'
+                       'audio' if allowed_types.include?('all') || allowed_types.include?('audio')
+                     when '.mp4', '.mov', '.avi', '.mkv', '.webm'
+                       'video' if allowed_types.include?('all') || allowed_types.include?('video')
+                     end
+      end
+      
+      { file: file, medium_type: medium_type } if medium_type
+    end
+  end
+
+  private
+
+  def self.save_uploaded_file_to_path(uploaded_file, file_path)
+    if uploaded_file.respond_to?(:tempfile) && uploaded_file.tempfile
+      FileUtils.copy_file(uploaded_file.tempfile.path, file_path)
+    else
+      File.open(file_path, 'wb') do |f|
+        f.write(uploaded_file.read)
+      end
+    end
+  end
+
+  def self.extract_dimensions(file_path, content_type)
+    return [nil, nil] unless content_type.start_with?('image/', 'video/')
+    
+    begin
+      require 'mini_magick'
+      image = MiniMagick::Image.open(file_path)
+      [image.width, image.height]
+    rescue => e
+      Rails.logger.debug "Could not extract dimensions from #{file_path}: #{e.message}"
+      [nil, nil]
+    end
+  end
+
+  def self.create_mediable_record(medium_type, uploaded_file, user)
+    case medium_type
+    when 'photo'
+      Photo.create(
+        title: File.basename(uploaded_file.original_filename, '.*').humanize,
+        description: nil
+      )
+    when 'audio'
+      # Audio.create(...) when we add Audio model
+      nil # For now
+    when 'video'
+      # Video.create(...) when we add Video model  
+      nil # For now
+    end
+  end
+
+  def self.process_medium_metadata(medium)
+    case medium.medium_type
+    when 'photo'
+      # Trigger EXIF extraction and thumbnail generation
+      medium.mediable.send(:extract_metadata_from_exif) if medium.mediable&.respond_to?(:extract_metadata_from_exif, true)
+      medium.mediable.send(:generate_thumbnail) if medium.mediable&.respond_to?(:generate_thumbnail, true)
+    when 'audio'
+      # Extract audio metadata when we add audio support
+    when 'video'
+      # Extract video metadata when we add video support
+    end
+  end
+
+end

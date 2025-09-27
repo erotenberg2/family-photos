@@ -1,8 +1,8 @@
 ActiveAdmin.register Photo, namespace: :family do
 
-  # Add custom action button to index page
+  # Add custom action button to index page  
   action_item :import_photos, only: :index do
-    link_to 'Import Photos', import_photos_family_photos_path, class: 'btn btn-primary'
+    link_to 'Import Photos', import_media_family_media_path(media_types: ['photo']), class: 'btn btn-primary'
   end
 
   # Permitted parameters

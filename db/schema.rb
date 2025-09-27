@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_08_07_013640) do
+ActiveRecord::Schema[8.0].define(version: 2025_09_27_185049) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -84,6 +84,32 @@ ActiveRecord::Schema[8.0].define(version: 2025_08_07_013640) do
     t.index ["user_id"], name: "index_albums_on_user_id"
   end
 
+  create_table "media", force: :cascade do |t|
+    t.string "file_path", null: false
+    t.integer "file_size"
+    t.string "original_filename"
+    t.string "content_type"
+    t.string "md5_hash", null: false
+    t.integer "width"
+    t.integer "height"
+    t.datetime "taken_at"
+    t.bigint "uploaded_by_id", null: false
+    t.bigint "user_id", null: false
+    t.string "medium_type", null: false
+    t.string "mediable_type", null: false
+    t.bigint "mediable_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["created_at"], name: "index_media_on_created_at"
+    t.index ["file_path"], name: "index_media_on_file_path", unique: true
+    t.index ["md5_hash"], name: "index_media_on_md5_hash", unique: true
+    t.index ["mediable_type", "mediable_id"], name: "index_media_on_mediable"
+    t.index ["medium_type"], name: "index_media_on_medium_type"
+    t.index ["taken_at"], name: "index_media_on_taken_at"
+    t.index ["uploaded_by_id"], name: "index_media_on_uploaded_by_id"
+    t.index ["user_id"], name: "index_media_on_user_id"
+  end
+
   create_table "photo_albums", force: :cascade do |t|
     t.bigint "photo_id", null: false
     t.bigint "album_id", null: false
@@ -99,32 +125,18 @@ ActiveRecord::Schema[8.0].define(version: 2025_08_07_013640) do
   create_table "photos", force: :cascade do |t|
     t.string "title"
     t.text "description"
-    t.string "file_path", null: false
-    t.integer "file_size"
-    t.integer "width"
-    t.integer "height"
-    t.datetime "taken_at"
     t.json "exif_data", default: {}
     t.string "thumbnail_path"
     t.integer "thumbnail_width"
     t.integer "thumbnail_height"
-    t.bigint "uploaded_by_id", null: false
-    t.bigint "user_id", null: false
-    t.string "original_filename"
-    t.string "content_type"
-    t.string "md5_hash"
     t.float "latitude"
     t.float "longitude"
     t.string "camera_make"
     t.string "camera_model"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
-    t.index ["created_at"], name: "index_photos_on_created_at"
-    t.index ["latitude", "longitude"], name: "index_photos_on_latitude_and_longitude"
-    t.index ["md5_hash"], name: "index_photos_on_md5_hash", unique: true
-    t.index ["taken_at"], name: "index_photos_on_taken_at"
-    t.index ["uploaded_by_id"], name: "index_photos_on_uploaded_by_id"
-    t.index ["user_id"], name: "index_photos_on_user_id"
+    t.bigint "medium_id"
+    t.index ["medium_id"], name: "index_photos_on_medium_id"
   end
 
   create_table "users", force: :cascade do |t|
@@ -151,8 +163,9 @@ ActiveRecord::Schema[8.0].define(version: 2025_08_07_013640) do
   add_foreign_key "albums", "photos", column: "cover_photo_id"
   add_foreign_key "albums", "users"
   add_foreign_key "albums", "users", column: "created_by_id"
+  add_foreign_key "media", "users"
+  add_foreign_key "media", "users", column: "uploaded_by_id"
   add_foreign_key "photo_albums", "albums"
   add_foreign_key "photo_albums", "photos"
-  add_foreign_key "photos", "users"
-  add_foreign_key "photos", "users", column: "uploaded_by_id"
+  add_foreign_key "photos", "media"
 end

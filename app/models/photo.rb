@@ -1,32 +1,31 @@
 class Photo < ApplicationRecord
-  belongs_to :uploaded_by, class_name: 'User'
-  belongs_to :user
+  has_one :medium, as: :mediable, dependent: :destroy
   
   has_many :photo_albums, dependent: :destroy
   has_many :albums, through: :photo_albums
   has_one :cover_album, class_name: 'Album', foreign_key: 'cover_photo_id'
 
-  # Validations
-  validates :file_path, presence: true, uniqueness: true
-  validates :md5_hash, presence: true, uniqueness: true
-  validates :file_size, presence: true, numericality: { greater_than: 0 }
-  validates :width, :height, presence: true, numericality: { greater_than: 0 }
-  validates :original_filename, presence: true
-  validates :content_type, presence: true, inclusion: { 
-    in: %w[image/jpeg image/jpg image/png image/gif image/bmp image/tiff image/heic image/heif],
-    message: 'must be a valid image format'
-  }
+  # Validations for photo-specific attributes
+  validates :latitude, :longitude, numericality: true, allow_nil: true
+  
+  # Delegate generic media attributes to Medium
+  delegate :file_path, :file_size, :original_filename, :content_type, :md5_hash,
+           :width, :height, :taken_at, :uploaded_by, :user, :file_size_human,
+           :taken_date, :file_exists?, to: :medium, allow_nil: true
+           
+  # Note: Medium creates Photo, not the other way around
 
   def self.ransackable_attributes(auth_object = nil)
-    ["camera_make", "camera_model", "content_type", "created_at", "description", "exif_data", "file_path", "file_size", "height", "id", "latitude", "longitude", "md5_hash", "original_filename", "taken_at", "thumbnail_height", "thumbnail_path", "thumbnail_width", "title", "updated_at", "uploaded_by_id", "user_id", "width"]
+    ["camera_make", "camera_model", "created_at", "description", "exif_data", 
+     "id", "latitude", "longitude", "thumbnail_height", "thumbnail_path", 
+     "thumbnail_width", "title", "updated_at"]
   end
 
   def self.ransackable_associations(auth_object = nil)
-    ["albums", "uploaded_by", "user"]
+    ["albums", "medium"]
   end
 
-  # Scopes
-  scope :by_date, -> { order(:taken_at, :created_at) }
+  # Scopes  
   scope :recent, -> { order(created_at: :desc) }
   scope :with_location, -> { where.not(latitude: nil, longitude: nil) }
   scope :by_camera, ->(make, model = nil) { 
@@ -34,8 +33,12 @@ class Photo < ApplicationRecord
     query = query.where(camera_model: model) if model
     query
   }
+  
+  # Scopes that work with Medium
+  scope :by_date, -> { joins(:medium).order('media.taken_at, media.created_at') }
+  scope :by_file_type, ->(type) { joins(:medium).where(media: { content_type: type }) }
 
-  # Callbacks
+  # Callbacks  
   before_save :extract_metadata_from_exif
   after_create :generate_thumbnail
 
@@ -53,7 +56,7 @@ class Photo < ApplicationRecord
     return {} unless File.exist?(file_path)
     
     begin
-      case content_type
+      case medium&.content_type
       when 'image/jpeg', 'image/jpg'
         require 'exifr/jpeg'
         exif = EXIFR::JPEG.new(file_path)
@@ -223,19 +226,24 @@ class Photo < ApplicationRecord
 
   private
 
+
   def extract_metadata_from_exif
-    return unless file_path_changed? && file_path.present?
+    return unless medium&.file_path&.present?
     
-    exif_info = extract_exif_data(file_path)
+    exif_info = extract_exif_data(medium.file_path)
     self.exif_data = exif_info
     
     # Extract specific fields from the complete EXIF hash for database columns
     # This allows for efficient querying while preserving all metadata
     self.camera_make = exif_info['Make'] if exif_info['Make']
     self.camera_model = exif_info['Model'] if exif_info['Model']
-    self.taken_at = exif_info['DateTimeOriginal'] if exif_info['DateTimeOriginal']
     
-    # GPS coordinates might be in different formats
+    # Set taken_at on the medium record
+    if exif_info['DateTimeOriginal'] && medium
+      medium.update_column(:taken_at, exif_info['DateTimeOriginal'])
+    end
+    
+    # GPS coordinates are photo-specific and stay on the photo record
     self.latitude = extract_gps_coordinate(exif_info, 'GPSLatitude', exif_info['GPSLatitudeRef'])
     self.longitude = extract_gps_coordinate(exif_info, 'GPSLongitude', exif_info['GPSLongitudeRef'])
   end
@@ -283,8 +291,8 @@ class Photo < ApplicationRecord
       # Resize to thumbnail dimensions while maintaining aspect ratio
       image.resize "#{thumbnail_size[:width]}x#{thumbnail_size[:height]}>"
       
-      # Convert HEIC to JPEG for better browser compatibility
-      if content_type&.include?('heic') || content_type&.include?('heif')
+       # Convert HEIC to JPEG for better browser compatibility
+       if medium&.content_type&.include?('heic') || medium&.content_type&.include?('heif')
         # Change extension to .jpg for HEIC files
         self.thumbnail_path = thumbnail_path.gsub(/\.(heic|heif)$/i, '.jpg')
         image.format 'jpg'

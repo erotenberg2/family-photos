@@ -1,0 +1,31 @@
+# Read about fixtures at https://api.rubyonrails.org/classes/ActiveRecord/FixtureSet.html
+
+one:
+  file_path: MyString
+  file_size: 1
+  original_filename: MyString
+  content_type: MyString
+  md5_hash: MyString
+  width: 1
+  height: 1
+  taken_at: 2025-09-27 11:49:03
+  uploaded_by: one
+  user: one
+  medium_type: MyString
+  mediable: one
+  mediable_type: Mediable
+
+two:
+  file_path: MyString
+  file_size: 1
+  original_filename: MyString
+  content_type: MyString
+  md5_hash: MyString
+  width: 1
+  height: 1
+  taken_at: 2025-09-27 11:49:03
+  uploaded_by: two
+  user: two
+  medium_type: MyString
+  mediable: two
+  mediable_type: Mediable

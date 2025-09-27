@@ -5,7 +5,7 @@ ActiveAdmin.register_page "Dashboard", namespace: :family do
     
     columns do
       column do
-        panel "Photo Import Status" do
+        panel "Media Import Status" do
           div id: "job-monitor", style: "min-height: 120px;" do
             div id: "job-status", style: "text-align: center; padding: 20px; color: #666;" do
               "Loading job status..."
@@ -13,12 +13,17 @@ ActiveAdmin.register_page "Dashboard", namespace: :family do
           end
         end
         
-        panel "Recent Photos" do
+        panel "Recent Media" do
           ul do
-            Photo.order(created_at: :desc).limit(10).map do |photo|
+            Medium.includes(:mediable).order(created_at: :desc).limit(10).map do |medium|
               li do
-                link_to photo.title || photo.original_filename, family_photo_path(photo)
-                span " - #{time_ago_in_words(photo.created_at)} ago", style: "color: #999; font-size: 12px;"
+                case medium.medium_type
+                when 'photo'
+                  link_to medium.mediable&.title || medium.original_filename || "Untitled", family_photo_path(medium.mediable)
+                else
+                  link_to medium.original_filename || "Untitled", family_medium_path(medium)
+                end
+                span " (#{medium.medium_type}) - #{time_ago_in_words(medium.created_at)} ago", style: "color: #999; font-size: 12px;"
               end
             end
           end
@@ -26,36 +31,43 @@ ActiveAdmin.register_page "Dashboard", namespace: :family do
       end
       
       column do
-        panel "Photo Statistics" do
+        panel "Media Statistics" do
           table do
             tr do
-              td "Total Photos:"
-              td Photo.count, style: "font-weight: bold;"
+              td "Total Media Files:"
+              td Medium.count, style: "font-weight: bold;"
+            end
+            tr do
+              td "Photos:"
+              td Medium.where(medium_type: 'photo').count, style: "font-weight: bold;"
             end
             tr do
               td "Storage Used:"
-              td number_to_human_size(Photo.sum(:file_size) || 0), style: "font-weight: bold;"
+              td number_to_human_size(Medium.sum(:file_size) || 0), style: "font-weight: bold;"
             end
             tr do
-              td "Photos Today:"
-              td Photo.where('created_at >= ?', Date.current.beginning_of_day).count, style: "font-weight: bold;"
+              td "Media Added Today:"
+              td Medium.where('created_at >= ?', Date.current.beginning_of_day).count, style: "font-weight: bold;"
             end
             tr do
-              td "Photos This Week:"
-              td Photo.where('created_at >= ?', 1.week.ago).count, style: "font-weight: bold;"
+              td "Media This Week:"
+              td Medium.where('created_at >= ?', 1.week.ago).count, style: "font-weight: bold;"
             end
           end
         end
         
         panel "Quick Actions" do
           div style: "text-align: center;" do
-            link_to "Import Photos", import_photos_family_photos_path, 
+            link_to "Import Media", import_media_family_media_path, 
                     class: "btn btn-primary", 
                     style: "display: inline-block; margin: 10px; padding: 10px 20px; background: #007cba; color: white; text-decoration: none; border-radius: 4px;"
             br
-            link_to "View All Photos", family_photos_path, 
+            link_to "View All Media", family_media_path, 
                     class: "btn btn-secondary",
-                    style: "display: inline-block; margin: 10px; padding: 8px 16px; background: #6c757d; color: white; text-decoration: none; border-radius: 4px;"
+                    style: "display: inline-block; margin: 5px; padding: 8px 16px; background: #6c757d; color: white; text-decoration: none; border-radius: 4px;"
+            link_to "View Photos", family_photos_path, 
+                    class: "btn btn-secondary",
+                    style: "display: inline-block; margin: 5px; padding: 8px 16px; background: #6c757d; color: white; text-decoration: none; border-radius: 4px;"
           end
         end
       end
@@ -74,7 +86,7 @@ ActiveAdmin.register_page "Dashboard", namespace: :family do
                 statusDiv.innerHTML = `
                   <div style="background: #e8f4fd; padding: 15px; border-radius: 6px; border-left: 4px solid #007cba;">
                     <div style="font-size: 16px; font-weight: bold; color: #007cba; margin-bottom: 8px;">
-                      📸 Photo Import in Progress
+                      📁 Media Import in Progress
                     </div>
                     <div style="margin-bottom: 10px;">
                       <strong>${data.processing_jobs}</strong> job(s) processing, 
@@ -92,7 +104,7 @@ ActiveAdmin.register_page "Dashboard", namespace: :family do
                 statusDiv.innerHTML = `
                   <div style="background: #d4edda; padding: 15px; border-radius: 6px; border-left: 4px solid #28a745;">
                     <div style="font-size: 16px; font-weight: bold; color: #28a745; margin-bottom: 8px;">
-                      ✅ All Photos Imported
+                      ✅ All Media Imported
                     </div>
                     <div style="color: #155724;">
                       <strong>${data.completed_jobs}</strong> job(s) completed recently
@@ -106,7 +118,7 @@ ActiveAdmin.register_page "Dashboard", namespace: :family do
                       💤 No Active Jobs
                     </div>
                     <div style="color: #6c757d; font-size: 14px;">
-                      Ready to import photos
+                      Ready to import media
                     </div>
                   </div>
                 `;

@@ -31,12 +31,16 @@ class Family::JobStatusController < ApplicationController
       nil
     end
     
-    # Check specifically for PhotoImportJob
-    photo_import_jobs = 0
+    # Check specifically for MediumImportJob and MediumEnqueueJob
+    medium_import_jobs = 0
+    medium_enqueue_jobs = 0
     queues.each do |queue|
       queue.each do |job|
-        if job.klass == 'PhotoImportJob'
-          photo_import_jobs += 1
+        case job.klass
+        when 'MediumImportJob'
+          medium_import_jobs += 1
+        when 'MediumEnqueueJob'
+          medium_enqueue_jobs += 1
         end
       end
     end
@@ -45,7 +49,8 @@ class Family::JobStatusController < ApplicationController
       processing_jobs: processing_jobs,
       queued_jobs: queued_jobs,
       completed_jobs: completed_jobs,
-      photo_import_jobs: photo_import_jobs,
+      medium_import_jobs: medium_import_jobs,
+      medium_enqueue_jobs: medium_enqueue_jobs,
       oldest_job_time: oldest_job_time_formatted,
       total_failed: stats.failed,
       timestamp: Time.current.to_i
@@ -58,7 +63,8 @@ class Family::JobStatusController < ApplicationController
       processing_jobs: 0,
       queued_jobs: 0,
       completed_jobs: 0,
-      photo_import_jobs: 0,
+      medium_import_jobs: 0,
+      medium_enqueue_jobs: 0,
       oldest_job_time: nil,
       total_failed: 0,
       timestamp: Time.current.to_i

@@ -1,0 +1,257 @@
+ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
+
+  # Add custom action buttons to index page
+  action_item :import_media, only: :index do
+    link_to 'Import Media', import_media_family_media_path, class: 'btn btn-primary'
+  end
+
+  # Permitted parameters
+  permit_params :file_path, :file_size, :original_filename, :content_type, :md5_hash,
+                :width, :height, :taken_at, :medium_type, :uploaded_by_id, :user_id
+
+  # Index page configuration
+  index do
+    selectable_column
+    
+    column "Thumbnail", sortable: false do |medium|
+      if medium.medium_type == 'photo' && medium.mediable&.thumbnail_path && File.exist?(medium.mediable.thumbnail_path)
+        link_to family_medium_path(medium) do
+          image_tag("data:image/jpg;base64,#{Base64.encode64(File.read(medium.mediable.thumbnail_path))}", 
+                    style: "max-width: 60px; max-height: 60px; object-fit: cover; border-radius: 4px; cursor: pointer; transition: transform 0.2s ease; display: block;",
+                    alt: medium.mediable&.title || medium.original_filename,
+                    onmouseover: "this.style.transform='scale(1.05)'",
+                    onmouseout: "this.style.transform='scale(1)'")
+        end
+      elsif medium.file_path && File.exist?(medium.file_path)
+        link_to family_medium_path(medium) do
+          case medium.medium_type
+          when 'photo'
+            image_tag("data:image/#{medium.content_type.split('/').last};base64,#{Base64.encode64(File.read(medium.file_path))}", 
+                      style: "max-width: 60px; max-height: 60px; object-fit: cover; border-radius: 4px; cursor: pointer; transition: transform 0.2s ease; display: block;",
+                      alt: medium.mediable&.title || medium.original_filename,
+                      onmouseover: "this.style.transform='scale(1.05)'",
+                      onmouseout: "this.style.transform='scale(1)'")
+          when 'audio'
+            content_tag :div, "🎵", style: "width: 60px; height: 60px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; font-size: 24px; border-radius: 4px; cursor: pointer;"
+          when 'video'
+            content_tag :div, "🎬", style: "width: 60px; height: 60px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; font-size: 24px; border-radius: 4px; cursor: pointer;"
+          else
+            content_tag :div, "📄", style: "width: 60px; height: 60px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; font-size: 24px; border-radius: 4px; cursor: pointer;"
+          end
+        end
+      else
+        content_tag :div, "❌", style: "width: 60px; height: 60px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; font-size: 24px; color: #666; border-radius: 4px;"
+      end
+    end
+    
+    column "Type" do |medium|
+      status_tag medium.medium_type.humanize, class: "#{medium.medium_type}_type"
+    end
+    
+    column "Title" do |medium|
+      medium.mediable&.title || "Untitled"
+    end
+    
+    column :original_filename
+    column :user
+    column :uploaded_by
+    column :taken_at
+    column "Dimensions" do |medium|
+      if medium.width && medium.height
+        "#{medium.width}×#{medium.height}"
+      else
+        "—"
+      end
+    end
+    column "File Size" do |medium|
+      medium.file_size_human
+    end
+    column :content_type
+    column :created_at
+    
+    actions
+  end
+
+  # Filters
+  filter :medium_type, as: :select, collection: Medium.medium_types.keys.map { |k| [k.humanize, k] }
+  filter :content_type, as: :select, collection: proc { Medium.distinct.pluck(:content_type).compact.sort }
+  filter :original_filename
+  filter :user
+  filter :uploaded_by
+  filter :taken_at
+  filter :created_at
+
+  # Show page configuration
+  show do
+    # Add CSS for hover effects
+    content_for :head do
+      raw <<~CSS
+        <style>
+          .media-preview-link:hover img, .media-preview-link:hover video {
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2) !important;
+            transform: scale(1.02);
+          }
+          .media-preview-link img, .media-preview-link video {
+            transition: all 0.3s ease !important;
+          }
+        </style>
+      CSS
+    end
+
+    # Media preview panel
+    panel "Media Preview" do
+      case medium.medium_type
+      when 'photo'
+        if medium.mediable&.thumbnail_path && File.exist?(medium.mediable.thumbnail_path)
+          link_to image_tag("data:image/jpg;base64,#{Base64.encode64(File.read(medium.mediable.thumbnail_path))}", 
+                    style: "max-width: 400px; max-height: 400px; object-fit: contain; border: 1px solid #ddd; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); display: block; margin: 0 auto;",
+                    alt: medium.mediable&.title || medium.original_filename), medium.file_path, target: "_blank"
+        else
+          div "Photo preview not available", style: "padding: 40px; background: #f0f0f0; color: #666; border-radius: 8px; text-align: center;"
+        end
+      when 'audio'
+        if medium.file_exists?
+          audio_tag medium.file_path, controls: true, style: "width: 100%; max-width: 400px; margin: 0 auto; display: block;"
+        else
+          div "Audio file not found", style: "padding: 40px; background: #f0f0f0; color: #666; border-radius: 8px; text-align: center;"
+        end
+      when 'video' 
+        if medium.file_exists?
+          video_tag medium.file_path, controls: true, style: "max-width: 400px; max-height: 400px; margin: 0 auto; display: block;"
+        else
+          div "Video file not found", style: "padding: 40px; background: #f0f0f0; color: #666; border-radius: 8px; text-align: center;"
+        end
+      else
+        div "Preview not available for this media type", style: "padding: 40px; background: #f0f0f0; color: #666; border-radius: 8px; text-align: center;"
+      end
+    end
+
+    attributes_table do
+      row :id
+      row "Type" do |medium|
+        status_tag medium.medium_type.humanize, class: "#{medium.medium_type}_type"
+      end
+      row "Title" do |medium|
+        medium.mediable&.title || "Untitled"
+      end
+      row "Description" do |medium|
+        medium.mediable&.description || "No description"
+      end
+      row :original_filename
+      row :file_path
+      row :content_type
+      row :file_size do |medium|
+        medium.file_size_human
+      end
+      row :dimensions do |medium|
+        if medium.width && medium.height
+          "#{medium.width} × #{medium.height} pixels"
+        else
+          "Not available"
+        end
+      end
+      row :taken_at
+      row :user
+      row :uploaded_by
+      row :md5_hash
+      row :created_at
+      row :updated_at
+    end
+
+    # Show type-specific details
+    if medium.mediable
+      case medium.medium_type
+      when 'photo'
+        panel "Photo Details" do
+          attributes_table_for medium.mediable do
+            row :camera_make
+            row :camera_model
+            row :location do |photo|
+              if photo.latitude && photo.longitude
+                "#{photo.latitude}, #{photo.longitude}"
+              else
+                "No location data"
+              end
+            end
+            row :thumbnail_dimensions do |photo|
+              if photo.thumbnail_width && photo.thumbnail_height
+                "#{photo.thumbnail_width} × #{photo.thumbnail_height} pixels"
+              else
+                "Not generated"
+              end
+            end
+          end
+
+          if medium.mediable.exif_data.present?
+            h4 "EXIF Data"
+            pre JsonFormatterService.pretty_format(medium.mediable.exif_data), 
+                style: "background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace; font-size: 12px; line-height: 1.4; border: 1px solid #e0e0e0; white-space: pre-wrap;"
+          end
+        end
+      end
+    end
+  end
+
+  # Collection action for importing media
+  collection_action :import_media, method: [:get, :post] do
+    if request.post?
+      # Handle the media import
+      allowed_types = params[:media_types] || ['all']
+      
+      if params[:media_files].present?
+        Rails.logger.info "=== MEDIA IMPORT DEBUG ==="
+        Rails.logger.info "Allowed types: #{allowed_types}"
+        Rails.logger.info "Files count: #{params[:media_files].length}"
+        Rails.logger.info "User ID: #{current_user.id}"
+        
+        # Filter files by allowed types
+        filtered_files = Medium.filter_acceptable_files(params[:media_files], allowed_types)
+        
+        Rails.logger.info "Filtered files count: #{filtered_files.length}"
+        
+        imported_count = 0
+        errors = []
+        
+        filtered_files.each do |file_info|
+          file = file_info[:file]
+          medium_type = file_info[:medium_type]
+          
+          Rails.logger.info "Processing #{medium_type}: #{file.original_filename}"
+          
+          result = Medium.create_from_uploaded_file(file, current_user, medium_type)
+          
+          if result[:success]
+            imported_count += 1
+            Rails.logger.info "✅ Successfully imported: #{file.original_filename}"
+          else
+            error_msg = result[:error] || "Unknown error"
+            errors << "#{file.original_filename}: #{error_msg}"
+            Rails.logger.error "❌ Failed to import: #{file.original_filename} - #{error_msg}"
+          end
+        end
+        
+        Rails.logger.info "=== IMPORT SUMMARY ==="
+        Rails.logger.info "Successfully imported: #{imported_count}"
+        Rails.logger.info "Errors: #{errors.length}"
+        
+        render json: { 
+          status: 'success', 
+          message: "Imported #{imported_count} media file(s)#{errors.any? ? " (#{errors.length} failed)" : ""}",
+          imported_count: imported_count,
+          error_count: errors.length,
+          errors: errors
+        }
+      else
+        Rails.logger.error "No media files found in request"
+        render json: { 
+          status: 'error', 
+          message: "No files provided" 
+        }, status: 400
+      end
+    else
+      # Show the import form
+      render 'import_media'
+    end
+  end
+
+end
