@@ -100,24 +100,24 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
 
     # Media preview panel
     panel "Media Preview" do
-      case medium.medium_type
+      case resource.medium_type
       when 'photo'
-        if medium.mediable&.thumbnail_path && File.exist?(medium.mediable.thumbnail_path)
-          link_to image_tag("data:image/jpg;base64,#{Base64.encode64(File.read(medium.mediable.thumbnail_path))}", 
+        if resource.mediable&.thumbnail_path && File.exist?(resource.mediable.thumbnail_path)
+          link_to image_tag("data:image/jpg;base64,#{Base64.encode64(File.read(resource.mediable.thumbnail_path))}", 
                     style: "max-width: 400px; max-height: 400px; object-fit: contain; border: 1px solid #ddd; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); display: block; margin: 0 auto;",
-                    alt: medium.mediable&.title || medium.original_filename), medium.file_path, target: "_blank"
+                    alt: resource.mediable&.title || resource.original_filename), image_path(resource), target: "_blank"
         else
           div "Photo preview not available", style: "padding: 40px; background: #f0f0f0; color: #666; border-radius: 8px; text-align: center;"
         end
       when 'audio'
-        if medium.file_exists?
-          audio_tag medium.file_path, controls: true, style: "width: 100%; max-width: 400px; margin: 0 auto; display: block;"
+        if resource.file_exists?
+          audio_tag image_path(resource), controls: true, style: "width: 100%; max-width: 400px; margin: 0 auto; display: block;"
         else
           div "Audio file not found", style: "padding: 40px; background: #f0f0f0; color: #666; border-radius: 8px; text-align: center;"
         end
       when 'video' 
-        if medium.file_exists?
-          video_tag medium.file_path, controls: true, style: "max-width: 400px; max-height: 400px; margin: 0 auto; display: block;"
+        if resource.file_exists?
+          video_tag image_path(resource), controls: true, style: "max-width: 400px; max-height: 400px; margin: 0 auto; display: block;"
         else
           div "Video file not found", style: "padding: 40px; background: #f0f0f0; color: #666; border-radius: 8px; text-align: center;"
         end
@@ -128,24 +128,24 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
 
     attributes_table do
       row :id
-      row "Type" do |medium|
-        status_tag medium.medium_type.humanize, class: "#{medium.medium_type}_type"
+      row "Type" do |resource|
+        status_tag resource.medium_type.humanize, class: "#{resource.medium_type}_type"
       end
-      row "Title" do |medium|
-        medium.mediable&.title || "Untitled"
+      row "Title" do |resource|
+        resource.mediable&.title || "Untitled"
       end
-      row "Description" do |medium|
-        medium.mediable&.description || "No description"
+      row "Description" do |resource|
+        resource.mediable&.description || "No description"
       end
       row :original_filename
       row :file_path
       row :content_type
-      row :file_size do |medium|
-        medium.file_size_human
+      row :file_size do |resource|
+        resource.file_size_human
       end
-      row :dimensions do |medium|
-        if medium.width && medium.height
-          "#{medium.width} × #{medium.height} pixels"
+      row :dimensions do |resource|
+        if resource.width && resource.height
+          "#{resource.width} × #{resource.height} pixels"
         else
           "Not available"
         end
@@ -159,11 +159,11 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
     end
 
     # Show type-specific details
-    if medium.mediable
-      case medium.medium_type
+    if resource.mediable
+      case resource.medium_type
       when 'photo'
         panel "Photo Details" do
-          attributes_table_for medium.mediable do
+          attributes_table_for resource.mediable do
             row :camera_make
             row :camera_model
             row :location do |photo|
@@ -182,9 +182,9 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
             end
           end
 
-          if medium.mediable.exif_data.present?
+          if resource.mediable.exif_data.present?
             h4 "EXIF Data"
-            pre JsonFormatterService.pretty_format(medium.mediable.exif_data), 
+            pre JsonFormatterService.pretty_format(resource.mediable.exif_data), 
                 style: "background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace; font-size: 12px; line-height: 1.4; border: 1px solid #e0e0e0; white-space: pre-wrap;"
           end
         end
@@ -218,7 +218,8 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
           
           Rails.logger.info "Processing #{medium_type}: #{file.original_filename}"
           
-          result = Medium.create_from_uploaded_file(file, current_user, medium_type)
+          # Temporarily disable post-processing for timing test
+          result = Medium.create_from_uploaded_file(file, current_user, medium_type, post_process: true)
           
           if result[:success]
             imported_count += 1

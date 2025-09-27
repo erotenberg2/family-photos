@@ -97,7 +97,7 @@ class Medium < ApplicationRecord
   end
 
   # Class method to create medium from uploaded file
-  def self.create_from_uploaded_file(uploaded_file, user, medium_type = nil)
+  def self.create_from_uploaded_file(uploaded_file, user, medium_type = nil, post_process: true)
     # Determine medium type if not specified
     medium_type ||= determine_medium_type_from_content_type(uploaded_file.content_type)
     
@@ -154,8 +154,20 @@ class Medium < ApplicationRecord
     if medium.save
       # The mediable association is already set in the medium creation above
       
-      # Process type-specific metadata
-      process_medium_metadata(medium)
+      # Process type-specific metadata if requested
+      Rails.logger.info "🔍 Post-process parameter: #{post_process} for: #{medium.original_filename}"
+      if post_process
+        Rails.logger.info "🔄 Starting post-processing for: #{medium.original_filename}"
+        begin
+          post_process_media(medium)
+          Rails.logger.info "✅ Post-processing completed for: #{medium.original_filename}"
+        rescue => e
+          Rails.logger.error "❌ Post-processing failed for #{medium.original_filename}: #{e.message}"
+          Rails.logger.error "Backtrace: #{e.backtrace.join("\n")}"
+        end
+      else
+        Rails.logger.info "⏭️ Skipping post-processing for: #{medium.original_filename}"
+      end
       { success: true, medium: medium }
     else
       # Clean up files if creation failed
@@ -272,17 +284,62 @@ class Medium < ApplicationRecord
     end
   end
 
-  def self.process_medium_metadata(medium)
+  # Post-process media after upload (EXIF, thumbnails, etc.)
+  def self.post_process_media(medium)
+    Rails.logger.info "Post-processing #{medium.medium_type}: #{medium.original_filename}"
+    
     case medium.medium_type
     when 'photo'
       # Trigger EXIF extraction and thumbnail generation
-      medium.mediable.send(:extract_metadata_from_exif) if medium.mediable&.respond_to?(:extract_metadata_from_exif, true)
+      if medium.mediable&.respond_to?(:extract_metadata_from_exif, true)
+        photo = medium.mediable
+        photo.send(:extract_metadata_from_exif)
+        # Use update_columns to bypass callbacks and avoid infinite loop
+        photo.update_columns(
+          exif_data: photo.exif_data,
+          camera_make: photo.camera_make,
+          camera_model: photo.camera_model,
+          latitude: photo.latitude,
+          longitude: photo.longitude
+        )
+      end
       medium.mediable.send(:generate_thumbnail) if medium.mediable&.respond_to?(:generate_thumbnail, true)
     when 'audio'
       # Extract audio metadata when we add audio support
     when 'video'
       # Extract video metadata when we add video support
     end
+    
+    Rails.logger.info "Post-processing completed for: #{medium.original_filename}"
+  end
+
+  # Legacy method name for backwards compatibility
+  def self.process_medium_metadata(medium)
+    post_process_media(medium)
+  end
+
+  # Batch post-process media that were uploaded without processing
+  def self.batch_post_process_media(medium_ids = nil)
+    media_to_process = medium_ids ? where(id: medium_ids) : all
+    
+    Rails.logger.info "Starting batch post-processing for #{media_to_process.count} media files"
+    
+    processed_count = 0
+    errors = []
+    
+    media_to_process.find_each do |medium|
+      begin
+        post_process_media(medium)
+        processed_count += 1
+      rescue => e
+        error_msg = "#{medium.original_filename}: #{e.message}"
+        errors << error_msg
+        Rails.logger.error "Failed to post-process #{medium.original_filename}: #{e.message}"
+      end
+    end
+    
+    Rails.logger.info "Batch post-processing completed. Processed: #{processed_count}, Errors: #{errors.length}"
+    { processed_count: processed_count, errors: errors }
   end
 
 end

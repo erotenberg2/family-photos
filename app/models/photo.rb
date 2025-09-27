@@ -38,9 +38,9 @@ class Photo < ApplicationRecord
   scope :by_date, -> { joins(:medium).order('media.taken_at, media.created_at') }
   scope :by_file_type, ->(type) { joins(:medium).where(media: { content_type: type }) }
 
-  # Callbacks  
-  before_save :extract_metadata_from_exif
-  after_create :generate_thumbnail
+  # Callbacks removed - all processing now handled explicitly in post-processing
+  # before_save :extract_metadata_from_exif
+  # after_create :generate_thumbnail
 
   # Class methods
   def self.duplicate_by_hash(hash)
@@ -235,17 +235,19 @@ class Photo < ApplicationRecord
     
     # Extract specific fields from the complete EXIF hash for database columns
     # This allows for efficient querying while preserving all metadata
-    self.camera_make = exif_info['Make'] if exif_info['Make']
-    self.camera_model = exif_info['Model'] if exif_info['Model']
+    self.camera_make = exif_info[:make] if exif_info[:make]
+    self.camera_model = exif_info[:model] if exif_info[:model]
     
     # Set taken_at on the medium record
-    if exif_info['DateTimeOriginal'] && medium
-      medium.update_column(:taken_at, exif_info['DateTimeOriginal'])
+    if exif_info[:date_time_original] && medium
+      medium.update_column(:taken_at, exif_info[:date_time_original])
     end
     
     # GPS coordinates are photo-specific and stay on the photo record
-    self.latitude = extract_gps_coordinate(exif_info, 'GPSLatitude', exif_info['GPSLatitudeRef'])
-    self.longitude = extract_gps_coordinate(exif_info, 'GPSLongitude', exif_info['GPSLongitudeRef'])
+    self.latitude = extract_gps_coordinate(exif_info, :gps_latitude, exif_info[:gps_latitude_ref])
+    self.longitude = extract_gps_coordinate(exif_info, :gps_longitude, exif_info[:gps_longitude_ref])
+    
+    # Note: Changes are saved by explicit update_columns call in post-processing
   end
 
   def extract_gps_coordinate(exif_hash, coord_key, ref_key)
