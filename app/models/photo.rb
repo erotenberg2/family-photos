@@ -1,4 +1,31 @@
 class Photo < ApplicationRecord
+  # Image size constants
+  THUMBNAIL_MAX_SIZE = 128  # Small thumbnails for index pages
+  PREVIEW_MAX_SIZE = 400    # Larger previews for show pages
+  
+  # Define valid file types for photos
+  def self.valid_types
+    {
+      # Standard MIME types => file extensions
+      'image/jpeg' => ['.jpg', '.jpeg'],
+      'image/jpg' => ['.jpg'],                    # Non-standard but used by some systems
+      'image/pjpeg' => ['.jpg', '.jpeg'],         # Progressive JPEG (Internet Explorer)
+      'image/png' => ['.png'],
+      'image/x-png' => ['.png'],                  # Alternative PNG MIME type
+      'image/gif' => ['.gif'],
+      'image/bmp' => ['.bmp'],
+      'image/x-ms-bmp' => ['.bmp'],              # Microsoft BMP variant
+      'image/tiff' => ['.tiff', '.tif'],
+      'image/x-tiff' => ['.tiff', '.tif'],       # Alternative TIFF MIME type
+      'image/heic' => ['.heic'],
+      'image/heif' => ['.heif'],
+      'image/webp' => ['.webp'],
+      'image/svg+xml' => ['.svg'],               # SVG support
+      'image/x-icon' => ['.ico'],                # ICO files
+      'image/vnd.microsoft.icon' => ['.ico']     # Microsoft ICO variant
+    }
+  end
+  
   has_one :medium, as: :mediable, dependent: :destroy
   
   has_many :photo_albums, dependent: :destroy
@@ -17,7 +44,8 @@ class Photo < ApplicationRecord
 
   def self.ransackable_attributes(auth_object = nil)
     ["camera_make", "camera_model", "created_at", "description", "exif_data", 
-     "id", "latitude", "longitude", "thumbnail_height", "thumbnail_path", 
+     "id", "latitude", "longitude", "preview_height", "preview_path", 
+     "preview_width", "thumbnail_height", "thumbnail_path", 
      "thumbnail_width", "title", "updated_at"]
   end
 
@@ -144,23 +172,33 @@ class Photo < ApplicationRecord
   end
 
   def calculate_thumbnail_size
-    # Implement your custom rules here
-    # This is a placeholder - you can customize based on your requirements
+    calculate_size_for_max_dimension(THUMBNAIL_MAX_SIZE)
+  end
+
+  def calculate_preview_size
+    calculate_size_for_max_dimension(PREVIEW_MAX_SIZE)
+  end
+
+  private
+
+  def calculate_size_for_max_dimension(max_size)
+    return { width: max_size, height: max_size } unless width && height
     
-    max_dimension = if width > height
+    # Calculate dimensions maintaining aspect ratio
+    if width > height
       # Landscape
-      { width: 400, height: (400.0 * height / width).round }
+      new_width = [width, max_size].min
+      new_height = (new_width.to_f * height / width).round
     else
       # Portrait or square
-      { width: (400.0 * width / height).round, height: 400 }
+      new_height = [height, max_size].min
+      new_width = (new_height.to_f * width / height).round
     end
     
-    # Ensure minimum size
-    max_dimension[:width] = [max_dimension[:width], 100].max
-    max_dimension[:height] = [max_dimension[:height], 100].max
-    
-    max_dimension
+    { width: new_width, height: new_height }
   end
+
+  public
 
   def generate_thumbnail_path
     return nil unless file_path
@@ -172,8 +210,24 @@ class Photo < ApplicationRecord
     File.join(dir, "thumbs", "#{base}_thumb#{ext}")
   end
 
+  def generate_preview_path
+    return nil unless file_path
+    
+    dir = File.dirname(file_path)
+    ext = File.extname(file_path)
+    base = File.basename(file_path, ext)
+    
+    File.join(dir, "previews", "#{base}_preview#{ext}")
+  end
+
   def has_location?
     latitude.present? && longitude.present?
+  end
+
+  # Override Medium's post_processed? to check for thumbnail and preview
+  def post_processed?
+    thumbnail_path.present? && File.exist?(thumbnail_path) &&
+    preview_path.present? && File.exist?(preview_path)
   end
 
   def location_coordinates
@@ -224,6 +278,35 @@ class Photo < ApplicationRecord
     taken_at || created_at
   end
 
+  def generate_thumbnail
+    return unless file_path.present? && File.exist?(file_path)
+    
+    begin
+      require 'mini_magick'
+      
+      # Generate thumbnail (small, for index pages)
+      generate_image_variant(:thumbnail)
+      
+      # Generate preview (larger, for show pages)  
+      generate_image_variant(:preview)
+      
+      Rails.logger.info "Generated thumbnail and preview for: #{file_path}"
+      
+      save if changed?
+      
+    rescue => e
+      Rails.logger.error "Failed to generate thumbnail/preview for #{file_path}: #{e.message}"
+      # Clear all generated image fields on failure
+      self.thumbnail_path = nil
+      self.thumbnail_width = nil
+      self.thumbnail_height = nil
+      self.preview_path = nil
+      self.preview_width = nil
+      self.preview_height = nil
+      save if changed?
+    end
+  end
+
   private
 
 
@@ -271,49 +354,47 @@ class Photo < ApplicationRecord
     nil
   end
 
-  def generate_thumbnail
-    return unless file_path.present? && File.exist?(file_path)
+  private
+
+  def generate_image_variant(variant_type)
+    # Calculate size and paths based on variant type
+    size = variant_type == :thumbnail ? calculate_thumbnail_size : calculate_preview_size
+    path = variant_type == :thumbnail ? generate_thumbnail_path : generate_preview_path
     
-    begin
-      thumbnail_size = calculate_thumbnail_size
-      self.thumbnail_width = thumbnail_size[:width]
-      self.thumbnail_height = thumbnail_size[:height]
-      self.thumbnail_path = generate_thumbnail_path
-      
-      # Create thumbnail directory if it doesn't exist
-      thumbnail_dir = File.dirname(thumbnail_path)
-      FileUtils.mkdir_p(thumbnail_dir) unless Dir.exist?(thumbnail_dir)
-      
-      # Generate thumbnail using MiniMagick
-      require 'mini_magick'
-      
-      # Open the original image
-      image = MiniMagick::Image.open(file_path)
-      
-      # Resize to thumbnail dimensions while maintaining aspect ratio
-      image.resize "#{thumbnail_size[:width]}x#{thumbnail_size[:height]}>"
-      
-       # Convert HEIC to JPEG for better browser compatibility
-       if medium&.content_type&.include?('heic') || medium&.content_type&.include?('heif')
-        # Change extension to .jpg for HEIC files
-        self.thumbnail_path = thumbnail_path.gsub(/\.(heic|heif)$/i, '.jpg')
-        image.format 'jpg'
-      end
-      
-      # Write the thumbnail file
-      image.write(thumbnail_path)
-      
-      Rails.logger.info "Generated thumbnail: #{thumbnail_path}"
-      
-      save if changed?
-      
-    rescue => e
-      Rails.logger.error "Failed to generate thumbnail for #{file_path}: #{e.message}"
-      # Clear thumbnail fields on failure
-      self.thumbnail_path = nil
-      self.thumbnail_width = nil
-      self.thumbnail_height = nil
-      save if changed?
+    # Set attributes
+    if variant_type == :thumbnail
+      self.thumbnail_width = size[:width]
+      self.thumbnail_height = size[:height]
+      self.thumbnail_path = path
+    else
+      self.preview_width = size[:width]
+      self.preview_height = size[:height]
+      self.preview_path = path
     end
+    
+    # Create directory if it doesn't exist
+    dir = File.dirname(path)
+    FileUtils.mkdir_p(dir) unless Dir.exist?(dir)
+    
+    # Open and resize image
+    image = MiniMagick::Image.open(file_path)
+    image.resize "#{size[:width]}x#{size[:height]}>"
+    
+    # Convert HEIC to JPEG for better browser compatibility
+    if medium&.content_type&.include?('heic') || medium&.content_type&.include?('heif')
+      # Change extension to .jpg for HEIC files
+      path = path.gsub(/\.(heic|heif)$/i, '.jpg')
+      if variant_type == :thumbnail
+        self.thumbnail_path = path
+      else
+        self.preview_path = path
+      end
+      image.format 'jpg'
+    end
+    
+    # Write the image file
+    image.write(path)
   end
+
+  public
 end

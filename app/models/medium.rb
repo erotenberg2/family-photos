@@ -96,12 +96,27 @@ class Medium < ApplicationRecord
     file_path.present? && File.exist?(file_path)
   end
 
+  # Generic post-processing status check
+  # Delegates to mediable's post_processed? method if available
+  def post_processed?
+    if mediable.present? && mediable.respond_to?(:post_processed?)
+      mediable.post_processed?
+    else
+      # Default fallback - assume processed if mediable exists
+      mediable.present?
+    end
+  end
+
   # Class method to create medium from uploaded file
-  def self.create_from_uploaded_file(uploaded_file, user, medium_type = nil, post_process: true)
+  def self.create_from_uploaded_file(uploaded_file, user, medium_type = nil, post_process: true, batch_id: nil, session_id: nil)
+    upload_started_at = Time.current
+    
     # Determine medium type if not specified
     medium_type ||= determine_medium_type_from_content_type(uploaded_file.content_type)
     
-    return nil unless medium_type
+    unless medium_type
+      return { error: "Unsupported file type: #{uploaded_file.content_type}" }
+    end
     
     # Generate unique file path
     timestamp = Time.current.strftime("%Y%m%d_%H%M%S")
@@ -129,6 +144,8 @@ class Medium < ApplicationRecord
       return { error: "Duplicate file already exists", existing: existing_medium }
     end
     
+    upload_completed_at = Time.current
+    
     # Extract dimensions for images/videos
     width, height = extract_dimensions(file_path, uploaded_file.content_type)
     
@@ -136,7 +153,7 @@ class Medium < ApplicationRecord
     mediable = create_mediable_record(medium_type, uploaded_file, user)
     return { error: "Failed to create #{medium_type} record" } unless mediable
     
-    # Create Medium record
+    # Create Medium record with timing information
     medium = new(
       file_path: file_path,
       file_size: File.size(file_path),
@@ -148,7 +165,11 @@ class Medium < ApplicationRecord
       medium_type: medium_type,
       mediable: mediable,
       uploaded_by: user,
-      user: user
+      user: user,
+      upload_started_at: upload_started_at,
+      upload_completed_at: upload_completed_at,
+      upload_batch_id: batch_id,
+      upload_session_id: session_id
     )
     
     if medium.save
@@ -157,23 +178,32 @@ class Medium < ApplicationRecord
       # Process type-specific metadata if requested
       Rails.logger.info "🔍 Post-process parameter: #{post_process} for: #{medium.original_filename}"
       if post_process
+        processing_started_at = Time.current
+        medium.update!(processing_started_at: processing_started_at)
+        
         Rails.logger.info "🔄 Starting post-processing for: #{medium.original_filename}"
         begin
           post_process_media(medium)
           Rails.logger.info "✅ Post-processing completed for: #{medium.original_filename}"
+          medium.update!(processing_completed_at: Time.current)
         rescue => e
           Rails.logger.error "❌ Post-processing failed for #{medium.original_filename}: #{e.message}"
           Rails.logger.error "Backtrace: #{e.backtrace.join("\n")}"
+          medium.update!(processing_completed_at: Time.current)
+          # Note: We still return success since the medium was created, just post-processing failed
         end
       else
         Rails.logger.info "⏭️ Skipping post-processing for: #{medium.original_filename}"
       end
+      
       { success: true, medium: medium }
     else
       # Clean up files if creation failed
       File.delete(file_path) if File.exist?(file_path)
       mediable.destroy if mediable
-      { error: medium.errors.full_messages.join(', ') }
+      
+      error_message = medium.errors.full_messages.join(', ')
+      { error: error_message }
     end
   end
   
@@ -181,16 +211,17 @@ class Medium < ApplicationRecord
   def self.determine_medium_type_from_content_type(content_type)
     return nil unless content_type
     
-    case content_type.downcase
-    when /^image\//
-      'photo'
-    when /^audio\//
-      'audio'
-    when /^video\//
-      'video'
-    else
-      nil
+    content_type = content_type.downcase
+    
+    # Check against Photo valid types
+    if defined?(Photo) && Photo.respond_to?(:valid_types)
+      return 'photo' if Photo.valid_types.key?(content_type)
     end
+    
+    # TODO: Add audio and video checks when those models exist
+    # For now, we only support photos
+    
+    nil
   end
   
   # Filter files by acceptable types for import
@@ -198,48 +229,45 @@ class Medium < ApplicationRecord
     return [] if files.empty?
     
     acceptable_types = {}
+    valid_extensions = {}
     
+    # Build acceptable types from mediable classes
     if allowed_types.include?('all') || allowed_types.include?('photo')
-      acceptable_types.merge!({
-        'image/jpeg' => 'photo', 'image/jpg' => 'photo', 'image/png' => 'photo',
-        'image/gif' => 'photo', 'image/bmp' => 'photo', 'image/tiff' => 'photo',
-        'image/heic' => 'photo', 'image/heif' => 'photo', 'image/webp' => 'photo'
-      })
+      if defined?(Photo) && Photo.respond_to?(:valid_types)
+        Photo.valid_types.each do |mime_type, extensions|
+          acceptable_types[mime_type] = 'photo'
+          extensions.each { |ext| valid_extensions[ext] = 'photo' }
+        end
+      end
     end
     
-    if allowed_types.include?('all') || allowed_types.include?('audio')
-      acceptable_types.merge!({
-        'audio/mpeg' => 'audio', 'audio/mp3' => 'audio', 'audio/wav' => 'audio',
-        'audio/aac' => 'audio', 'audio/ogg' => 'audio', 'audio/flac' => 'audio'
-      })
-    end
-    
-    if allowed_types.include?('all') || allowed_types.include?('video')
-      acceptable_types.merge!({
-        'video/mp4' => 'video', 'video/mov' => 'video', 'video/avi' => 'video',
-        'video/mkv' => 'video', 'video/webm' => 'video'
-      })
-    end
+    # TODO: Add audio and video when those models are created
+    # For now, we'll reject audio/video files to prevent errors
     
     # Filter files and return with their determined types
     files.filter_map do |file|
       content_type = file.content_type&.downcase
+      extension = File.extname(file.original_filename).downcase
+      
+      # Check by MIME type first
       medium_type = acceptable_types[content_type]
       
       # Fallback to file extension if content type detection fails
       unless medium_type
-        extension = File.extname(file.original_filename).downcase
-        medium_type = case extension
-                     when '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif', '.heic', '.heif', '.webp'
-                       'photo' if allowed_types.include?('all') || allowed_types.include?('photo')
-                     when '.mp3', '.wav', '.aac', '.ogg', '.flac', '.m4a'
-                       'audio' if allowed_types.include?('all') || allowed_types.include?('audio')
-                     when '.mp4', '.mov', '.avi', '.mkv', '.webm'
-                       'video' if allowed_types.include?('all') || allowed_types.include?('video')
-                     end
+        medium_type = valid_extensions[extension]
       end
       
-      { file: file, medium_type: medium_type } if medium_type
+      if medium_type
+        {
+          file: file,
+          medium_type: medium_type,
+          content_type: content_type,
+          extension: extension
+        }
+      else
+        Rails.logger.warn "Skipping unsupported file: #{file.original_filename} (#{content_type}, #{extension})"
+        nil
+      end
     end
   end
 
@@ -303,7 +331,7 @@ class Medium < ApplicationRecord
           longitude: photo.longitude
         )
       end
-      medium.mediable.send(:generate_thumbnail) if medium.mediable&.respond_to?(:generate_thumbnail, true)
+      medium.mediable.generate_thumbnail if medium.mediable&.respond_to?(:generate_thumbnail)
     when 'audio'
       # Extract audio metadata when we add audio support
     when 'video'

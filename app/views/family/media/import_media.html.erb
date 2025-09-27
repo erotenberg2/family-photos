@@ -355,6 +355,10 @@ document.addEventListener('DOMContentLoaded', function() {
       const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
       formData.append('authenticity_token', csrfToken);
       
+      // Mark if this is the final batch
+      const isFinalBatch = endIndex >= totalFiles;
+      formData.append('is_final_batch', isFinalBatch.toString());
+      
       currentUploadController = new AbortController();
       
       fetch('/family/media/import_media', {

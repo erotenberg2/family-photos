@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_09_27_205206) do
+ActiveRecord::Schema[8.0].define(version: 2025_09_27_231638) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -84,6 +84,18 @@ ActiveRecord::Schema[8.0].define(version: 2025_09_27_205206) do
     t.index ["user_id"], name: "index_albums_on_user_id"
   end
 
+  create_table "audios", force: :cascade do |t|
+    t.string "title"
+    t.text "description"
+    t.integer "duration"
+    t.integer "bitrate"
+    t.string "artist"
+    t.string "album"
+    t.string "genre"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+  end
+
   create_table "media", force: :cascade do |t|
     t.string "file_path", null: false
     t.integer "file_size"
@@ -100,6 +112,12 @@ ActiveRecord::Schema[8.0].define(version: 2025_09_27_205206) do
     t.bigint "mediable_id", null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.datetime "upload_started_at"
+    t.datetime "upload_completed_at"
+    t.datetime "processing_started_at"
+    t.datetime "processing_completed_at"
+    t.string "upload_session_id"
+    t.string "upload_batch_id"
     t.index ["created_at"], name: "index_media_on_created_at"
     t.index ["file_path"], name: "index_media_on_file_path", unique: true
     t.index ["md5_hash"], name: "index_media_on_md5_hash", unique: true
@@ -135,6 +153,27 @@ ActiveRecord::Schema[8.0].define(version: 2025_09_27_205206) do
     t.string "camera_model"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "preview_path"
+    t.integer "preview_width"
+    t.integer "preview_height"
+  end
+
+  create_table "upload_logs", force: :cascade do |t|
+    t.bigint "user_id", null: false
+    t.datetime "session_started_at"
+    t.datetime "session_completed_at"
+    t.string "session_id"
+    t.string "batch_id"
+    t.text "user_agent"
+    t.integer "total_files_selected", default: 0
+    t.integer "files_imported", default: 0
+    t.integer "files_skipped", default: 0
+    t.jsonb "files_data", default: []
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["batch_id"], name: "index_upload_logs_on_batch_id", unique: true
+    t.index ["files_data"], name: "index_upload_logs_on_files_data", using: :gin
+    t.index ["user_id"], name: "index_upload_logs_on_user_id"
   end
 
   create_table "users", force: :cascade do |t|
@@ -165,4 +204,5 @@ ActiveRecord::Schema[8.0].define(version: 2025_09_27_205206) do
   add_foreign_key "media", "users", column: "uploaded_by_id"
   add_foreign_key "photo_albums", "albums"
   add_foreign_key "photo_albums", "photos"
+  add_foreign_key "upload_logs", "users"
 end

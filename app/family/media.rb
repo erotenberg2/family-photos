@@ -14,38 +14,40 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
     selectable_column
     
     column "Thumbnail", sortable: false do |medium|
-      if medium.medium_type == 'photo' && medium.mediable&.thumbnail_path && File.exist?(medium.mediable.thumbnail_path)
-        link_to family_medium_path(medium) do
-          image_tag("data:image/jpg;base64,#{Base64.encode64(File.read(medium.mediable.thumbnail_path))}", 
-                    style: "max-width: 60px; max-height: 60px; object-fit: cover; border-radius: 4px; cursor: pointer; transition: transform 0.2s ease; display: block;",
-                    alt: medium.mediable&.title || medium.original_filename,
-                    onmouseover: "this.style.transform='scale(1.05)'",
-                    onmouseout: "this.style.transform='scale(1)'")
-        end
-      elsif medium.file_path && File.exist?(medium.file_path)
-        link_to family_medium_path(medium) do
-          case medium.medium_type
-          when 'photo'
-            image_tag("data:image/#{medium.content_type.split('/').last};base64,#{Base64.encode64(File.read(medium.file_path))}", 
+      link_to family_medium_path(medium) do
+        case medium.medium_type
+        when 'photo'
+          if medium.mediable&.thumbnail_path && File.exist?(medium.mediable.thumbnail_path)
+            # Use small thumbnail (128x128 max)
+            image_tag("data:image/jpg;base64,#{Base64.encode64(File.read(medium.mediable.thumbnail_path))}", 
                       style: "max-width: 60px; max-height: 60px; object-fit: cover; border-radius: 4px; cursor: pointer; transition: transform 0.2s ease; display: block;",
                       alt: medium.mediable&.title || medium.original_filename,
                       onmouseover: "this.style.transform='scale(1.05)'",
                       onmouseout: "this.style.transform='scale(1)'")
-          when 'audio'
-            content_tag :div, "🎵", style: "width: 60px; height: 60px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; font-size: 24px; border-radius: 4px; cursor: pointer;"
-          when 'video'
-            content_tag :div, "🎬", style: "width: 60px; height: 60px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; font-size: 24px; border-radius: 4px; cursor: pointer;"
           else
-            content_tag :div, "📄", style: "width: 60px; height: 60px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; font-size: 24px; border-radius: 4px; cursor: pointer;"
+            # Show placeholder for unprocessed photos (don't load full image)
+            content_tag :div, "📷", style: "width: 60px; height: 60px; background: #f8f9fa; display: flex; align-items: center; justify-content: center; font-size: 24px; border-radius: 4px; cursor: pointer; border: 2px dashed #dee2e6;"
           end
+        when 'audio'
+          content_tag :div, "🎵", style: "width: 60px; height: 60px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; font-size: 24px; border-radius: 4px; cursor: pointer;"
+        when 'video'
+          content_tag :div, "🎬", style: "width: 60px; height: 60px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; font-size: 24px; border-radius: 4px; cursor: pointer;"
+        else
+          content_tag :div, "📄", style: "width: 60px; height: 60px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; font-size: 24px; border-radius: 4px; cursor: pointer;"
         end
-      else
-        content_tag :div, "❌", style: "width: 60px; height: 60px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; font-size: 24px; color: #666; border-radius: 4px;"
       end
     end
     
     column "Type" do |medium|
       status_tag medium.medium_type.humanize, class: "#{medium.medium_type}_type"
+    end
+    
+    column "Processing Status", sortable: false do |medium|
+      if medium.post_processed?
+        status_tag "Processed", class: :ok
+      else
+        status_tag "Pending", class: :warning
+      end
     end
     
     column "Title" do |medium|
@@ -102,8 +104,8 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
     panel "Media Preview" do
       case resource.medium_type
       when 'photo'
-        if resource.mediable&.thumbnail_path && File.exist?(resource.mediable.thumbnail_path)
-          link_to image_tag("data:image/jpg;base64,#{Base64.encode64(File.read(resource.mediable.thumbnail_path))}", 
+        if resource.mediable&.preview_path && File.exist?(resource.mediable.preview_path)
+          link_to image_tag("data:image/jpg;base64,#{Base64.encode64(File.read(resource.mediable.preview_path))}", 
                     style: "max-width: 400px; max-height: 400px; object-fit: contain; border: 1px solid #ddd; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); display: block; margin: 0 auto;",
                     alt: resource.mediable&.title || resource.original_filename), image_path(resource), target: "_blank"
         else
@@ -175,7 +177,14 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
             end
             row :thumbnail_dimensions do |photo|
               if photo.thumbnail_width && photo.thumbnail_height
-                "#{photo.thumbnail_width} × #{photo.thumbnail_height} pixels"
+                "#{photo.thumbnail_width} × #{photo.thumbnail_height} pixels (#{Photo::THUMBNAIL_MAX_SIZE}px max)"
+              else
+                "Not generated"
+              end
+            end
+            row :preview_dimensions do |photo|
+              if photo.preview_width && photo.preview_height
+                "#{photo.preview_width} × #{photo.preview_height} pixels (#{Photo::PREVIEW_MAX_SIZE}px max)"
               else
                 "Not generated"
               end
@@ -205,30 +214,109 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
         Rails.logger.info "User ID: #{current_user.id}"
         
         # Filter files by allowed types
-        filtered_files = Medium.filter_acceptable_files(params[:media_files], allowed_types)
+        all_files = params[:media_files] || []
+        filtered_files = Medium.filter_acceptable_files(all_files, allowed_types)
         
-        Rails.logger.info "Filtered files count: #{filtered_files.length}"
+        Rails.logger.info "Total files: #{all_files.length}, Filtered files count: #{filtered_files.length}"
+        
+        # Generate session ID for this upload session
+        session_id = session.id.to_s
+        
+        # Get or create upload log for this session
+        upload_log = UploadLog.find_by(session_id: session_id, session_completed_at: nil)
+        
+        if upload_log.nil?
+          # First batch - create new upload log
+          batch_id = SecureRandom.uuid
+          upload_log = UploadLog.create!(
+            user: current_user,
+            batch_id: batch_id,
+            session_id: session_id,
+            session_started_at: Time.current,
+            user_agent: request.user_agent,
+            total_files_selected: 0, # Will be incremented with each batch
+            files_imported: 0,
+            files_skipped: 0,
+            files_data: []
+          )
+          Rails.logger.info "Created new UploadLog for session: #{session_id}"
+        else
+          # Subsequent batch - use existing upload log
+          batch_id = upload_log.batch_id
+          Rails.logger.info "Using existing UploadLog for session: #{session_id}"
+        end
+        
+        # Update total files selected for this batch
+        upload_log.update!(
+          total_files_selected: upload_log.total_files_selected + all_files.length
+        )
         
         imported_count = 0
         errors = []
         
+        # Process rejected files first
+        rejected_files = all_files - filtered_files.map { |f| f[:file] }
+        rejected_files.each do |file|
+          upload_log.add_file_data(
+            filename: file.original_filename,
+            file_size: file.size,
+            content_type: file.content_type,
+            status: 'skipped',
+            skip_reason: 'File type not supported for import'
+          )
+        end
+        
+        # Process accepted files
         filtered_files.each do |file_info|
           file = file_info[:file]
           medium_type = file_info[:medium_type]
           
           Rails.logger.info "Processing #{medium_type}: #{file.original_filename}"
           
-          # Temporarily disable post-processing for timing test
-          result = Medium.create_from_uploaded_file(file, current_user, medium_type, post_process: false)
+          # Enable post-processing for full EXIF and thumbnail generation
+          result = Medium.create_from_uploaded_file(file, current_user, medium_type, post_process: true, batch_id: batch_id, session_id: session_id)
           
           if result[:success]
             imported_count += 1
             Rails.logger.info "✅ Successfully imported: #{file.original_filename}"
+            
+            # Add successful import to upload log
+            upload_log.add_file_data(
+              filename: file.original_filename,
+              file_size: file.size,
+              content_type: file.content_type,
+              status: 'imported',
+              medium: result[:medium]
+            )
           else
             error_msg = result[:error] || "Unknown error"
             errors << "#{file.original_filename}: #{error_msg}"
             Rails.logger.error "❌ Failed to import: #{file.original_filename} - #{error_msg}"
+            
+            # Add failed import to upload log
+            upload_log.add_file_data(
+              filename: file.original_filename,
+              file_size: file.size,
+              content_type: file.content_type,
+              status: 'skipped',
+              skip_reason: error_msg
+            )
           end
+        end
+        
+        # Update the upload session statistics
+        upload_log.update!(
+          files_imported: upload_log.files_imported + imported_count,
+          files_skipped: upload_log.files_skipped + (all_files.length - imported_count)
+        )
+        
+        # Check if this might be the final batch by looking at frontend parameters
+        is_final_batch = params[:is_final_batch] == 'true'
+        
+        if is_final_batch
+          # Mark session as completed
+          upload_log.update!(session_completed_at: Time.current)
+          Rails.logger.info "Completed UploadLog session: #{session_id}"
         end
         
         Rails.logger.info "=== IMPORT SUMMARY ==="
