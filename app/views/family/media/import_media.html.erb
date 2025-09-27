@@ -317,8 +317,10 @@ document.addEventListener('DOMContentLoaded', function() {
   let uploadInProgress = false;
   let uploadCancelled = false;
   let currentUploadController = null;
+  let uploadStartTime = null;
 
   function startChunkedUpload(files) {
+    uploadStartTime = Date.now(); // Record start time
     const chunkSize = 10;
     const totalFiles = files.length;
     let uploadedCount = 0;
@@ -396,15 +398,30 @@ document.addEventListener('DOMContentLoaded', function() {
     uploadChunk(0);
   }
 
+  function formatDuration(milliseconds) {
+    const seconds = Math.floor(milliseconds / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    
+    if (minutes > 0) {
+      return `${minutes}m ${remainingSeconds}s`;
+    } else {
+      return `${remainingSeconds}s`;
+    }
+  }
+
   function uploadComplete(uploaded, errors, total) {
     uploadInProgress = false;
+    const duration = uploadStartTime ? Date.now() - uploadStartTime : 0;
+    const durationText = formatDuration(duration);
+    
     const feedback = document.getElementById('upload-feedback');
     if (feedback) {
       if (errors === 0) {
         feedback.innerHTML = `
           <div style="background: #d4edda; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #28a745;">
             <h3 style="margin: 0 0 15px 0; color: #155724;">✅ Upload Complete!</h3>
-            <p style="color: #155724; margin-bottom: 10px;">Successfully uploaded ${uploaded} media files.</p>
+            <p style="color: #155724; margin-bottom: 10px;">Successfully uploaded ${uploaded} media files in ${durationText}.</p>
             <div style="margin-top: 15px;">
               <button onclick="window.location.href='/family/media'" style="background: #28a745; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer;">Go to Media</button>
             </div>
@@ -414,7 +431,7 @@ document.addEventListener('DOMContentLoaded', function() {
         feedback.innerHTML = `
           <div style="background: #f8d7da; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #dc3545;">
             <h3 style="margin: 0 0 15px 0; color: #721c24;">⚠️ Upload Completed with Errors</h3>
-            <p style="color: #721c24; margin-bottom: 10px;">Uploaded ${uploaded} files, ${errors} failed.</p>
+            <p style="color: #721c24; margin-bottom: 10px;">Uploaded ${uploaded} files, ${errors} failed. Duration: ${durationText}.</p>
             <div style="margin-top: 15px;">
               <button onclick="window.location.href='/family/media'" style="background: #dc3545; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer;">Go to Media</button>
             </div>

@@ -219,7 +219,7 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
           Rails.logger.info "Processing #{medium_type}: #{file.original_filename}"
           
           # Temporarily disable post-processing for timing test
-          result = Medium.create_from_uploaded_file(file, current_user, medium_type, post_process: true)
+          result = Medium.create_from_uploaded_file(file, current_user, medium_type, post_process: false)
           
           if result[:success]
             imported_count += 1
