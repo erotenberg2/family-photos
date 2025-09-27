@@ -191,50 +191,215 @@ ActiveAdmin.register Photo, namespace: :family do
     f.actions
   end
 
-  # Collection actions
+    # Collection actions
   collection_action :import_photos, method: [:get, :post] do
     if request.post?
-      # Handle the photo import using background job
-      if params[:photos].present?
-        # Save uploaded files to temporary location and prepare data for the job
-        uploaded_files_data = []
-        temp_dir = Rails.root.join('tmp', 'photo_uploads')
-        FileUtils.mkdir_p(temp_dir) unless Dir.exist?(temp_dir)
-        
-        params[:photos].each do |photo_param|
-          file = photo_param[:file]
-          next unless file.present?
+                    # Handle photo import with actual file uploads
+       if params[:photos].present?
+         Rails.logger.info "=== PHOTO IMPORT DEBUG ==="
+         Rails.logger.info "Request content type: #{request.content_type}"
+         Rails.logger.info "Photos params count: #{params[:photos].length}"
+         Rails.logger.info "User ID: #{current_user.id}"
+         
+         # Create a unique temporary directory for this import session
+         session_id = SecureRandom.hex(16)
+         temp_dir = Rails.root.join('tmp', 'photo_uploads', session_id)
+         FileUtils.mkdir_p(temp_dir)
+         
+         Rails.logger.info "Created temp directory: #{temp_dir}"
+         
+         file_count = 0
+         
+         params[:photos].each do |photo_param|
+           file = photo_param[:file]
+           next unless file.present?
+           
+           Rails.logger.info "Processing file: #{file.original_filename} (#{file.size} bytes)"
+           
+           # Save to temporary file with original structure
+           original_filename = file.original_filename
+           file_path = temp_dir.join(original_filename)
+           
+           # Create directory structure if needed
+           FileUtils.mkdir_p(File.dirname(file_path))
+           
+           # Write file to temporary location
+           File.open(file_path, 'wb') do |f|
+             f.write(file.read)
+           end
+           
+           file_count += 1
+         end
+         
+         Rails.logger.info "Saved #{file_count} files to temp directory"
+         
+                 if file_count > 0
+          # Process files directly (no background jobs)
+          imported_count = 0
+          errors = []
           
-          # Save to temporary file
-          temp_filename = "#{SecureRandom.hex(16)}_#{file.original_filename}"
-          temp_path = temp_dir.join(temp_filename)
-          
-          File.open(temp_path, 'wb') do |f|
-            f.write(file.read)
+          params[:photos].each do |photo_param|
+            file = photo_param[:file]
+            next unless file.present?
+            
+            Rails.logger.info "=== PROCESSING FILE ==="
+            Rails.logger.info "File: #{file.original_filename}"
+            Rails.logger.info "Content type: #{file.content_type}"
+            Rails.logger.info "File size: #{file.size} bytes"
+            Rails.logger.info "File present: #{file.present?}"
+            
+            begin
+              # Validate it's an image file
+              unless file.content_type.start_with?('image/')
+                Rails.logger.error "Not a valid image file: #{file.content_type}"
+                errors << "#{file.original_filename}: Not a valid image file"
+                next
+              end
+              
+              # Generate unique file path
+              timestamp = Time.current.strftime("%Y%m%d_%H%M%S")
+              random_suffix = SecureRandom.hex(4)
+              file_extension = File.extname(file.original_filename)
+              stored_filename = "#{timestamp}_#{random_suffix}#{file_extension}"
+              
+              # Create upload directory if it doesn't exist
+              upload_dir = Rails.root.join('storage', 'photos')
+              FileUtils.mkdir_p(upload_dir) unless Dir.exist?(upload_dir)
+              
+              # Full file path
+              file_path = upload_dir.join(stored_filename).to_s
+              
+              # Write file to permanent location
+              Rails.logger.info "Writing file to: #{file_path}"
+              Rails.logger.info "Original file size: #{file.size} bytes"
+              Rails.logger.info "File class: #{file.class}"
+              Rails.logger.info "File tempfile: #{file.tempfile.path if file.respond_to?(:tempfile)}"
+              
+              # Copy from the tempfile directly
+              if file.respond_to?(:tempfile) && file.tempfile
+                FileUtils.copy_file(file.tempfile.path, file_path)
+              else
+                # Fallback: read and write the content
+                File.open(file_path, 'wb') do |f|
+                  f.write(file.read)
+                end
+              end
+              
+              Rails.logger.info "File written successfully, size: #{File.size(file_path)} bytes"
+              
+              # Calculate MD5 hash
+              Rails.logger.info "Calculating MD5 hash..."
+              md5_hash = Digest::MD5.file(file_path).hexdigest
+              Rails.logger.info "MD5 hash: #{md5_hash}"
+              
+              # Check for duplicates
+              existing_photo = Photo.find_by(md5_hash: md5_hash)
+              if existing_photo
+                Rails.logger.info "Duplicate found, cleaning up file"
+                File.delete(file_path) # Clean up duplicate file
+                errors << "#{file.original_filename}: Duplicate photo already exists"
+                next
+              end
+              Rails.logger.info "No duplicate found, proceeding with import"
+              
+              # Extract image dimensions using MiniMagick
+              require 'mini_magick'
+              begin
+                image = MiniMagick::Image.open(file_path)
+                width = image.width
+                height = image.height
+              rescue => e
+                Rails.logger.error "Failed to read image dimensions for #{file.original_filename}: #{e.message}"
+                # Try to get dimensions using identify command directly
+                begin
+                  result = `identify -format "%w %h" "#{file_path}" 2>/dev/null`
+                  if result && result.strip.match(/^\d+ \d+$/)
+                    width, height = result.strip.split(' ').map(&:to_i)
+                  else
+                    raise "Could not determine image dimensions"
+                  end
+                rescue => identify_error
+                  Rails.logger.error "Identify command also failed for #{file.original_filename}: #{identify_error.message}"
+                  errors << "#{file.original_filename}: Cannot read image dimensions - file may be corrupted or unsupported"
+                  File.delete(file_path) # Clean up the file
+                  next
+                end
+              end
+              
+              # Create Photo record
+              Rails.logger.info "Creating Photo record..."
+              Rails.logger.info "  - title: #{File.basename(file.original_filename, '.*').humanize}"
+              Rails.logger.info "  - file_path: #{file_path}"
+              Rails.logger.info "  - original_filename: #{file.original_filename}"
+              Rails.logger.info "  - content_type: #{file.content_type}"
+              Rails.logger.info "  - file_size: #{File.size(file_path)}"
+              Rails.logger.info "  - width: #{width}, height: #{height}"
+              Rails.logger.info "  - md5_hash: #{md5_hash}"
+              Rails.logger.info "  - user_id: #{current_user.id}"
+              
+              photo = Photo.new(
+                title: File.basename(file.original_filename, '.*').humanize,
+                file_path: file_path,
+                original_filename: file.original_filename,
+                content_type: file.content_type,
+                file_size: File.size(file_path),
+                width: width,
+                height: height,
+                md5_hash: md5_hash,
+                user: current_user,
+                uploaded_by: current_user
+              )
+              
+              if photo.save
+                imported_count += 1
+                Rails.logger.info "✅ Successfully imported: #{file.original_filename} (ID: #{photo.id})"
+              else
+                Rails.logger.error "❌ Failed to create Photo record:"
+                Rails.logger.error "  - Errors: #{photo.errors.full_messages}"
+                Rails.logger.error "  - Valid: #{photo.valid?}"
+                errors << "#{file.original_filename}: Photo creation failed: #{photo.errors.full_messages.join(', ')}"
+              end
+              
+            rescue => e
+              Rails.logger.error "❌ Exception during import of #{file.original_filename}:"
+              Rails.logger.error "  - Error: #{e.message}"
+              Rails.logger.error "  - Backtrace: #{e.backtrace.first(5).join("\n    ")}"
+              errors << "#{file.original_filename}: #{e.message}"
+            end
           end
           
-          # Store JSON-safe file data
-          uploaded_files_data << {
-            'original_filename' => file.original_filename,
-            'content_type' => file.content_type,
-            'temp_path' => temp_path.to_s,
-            'size' => file.size
-          }
-        end
-        
-        if uploaded_files_data.any?
-          # Enqueue the background job
-          job = PhotoImportJob.perform_async(uploaded_files_data, current_user.id)
+          # Clean up temp directory
+          FileUtils.rm_rf(temp_dir)
           
-          flash[:notice] = "Photo import started! #{uploaded_files_data.length} file(s) are being processed in the background. You can monitor progress at /sidekiq"
-        else
-          flash[:error] = "No valid files selected for import."
-        end
-      else
-        flash[:error] = "No files selected for import."
-      end
-      
-      redirect_to family_photos_path
+          Rails.logger.info "=== UPLOAD SUMMARY ==="
+          Rails.logger.info "Total files processed: #{params[:photos].length}"
+          Rails.logger.info "Successfully imported: #{imported_count}"
+          Rails.logger.info "Errors: #{errors.length}"
+          if errors.any?
+            Rails.logger.error "Error details:"
+            errors.each { |error| Rails.logger.error "  - #{error}" }
+          end
+          
+          render json: { 
+            status: 'success', 
+            message: "Imported #{imported_count} photos#{errors.any? ? " (#{errors.length} failed)" : ""}",
+            imported_count: imported_count,
+            error_count: errors.length
+          }
+         else
+           Rails.logger.error "No valid files found in upload"
+           render json: { 
+             status: 'error', 
+             message: "No valid files selected for import" 
+           }, status: 400
+         end
+       else
+         Rails.logger.error "No photos params found in request"
+         render json: { 
+           status: 'error', 
+           message: "No files provided" 
+         }, status: 400
+       end
     else
       # Show the import form
       render 'import_photos'

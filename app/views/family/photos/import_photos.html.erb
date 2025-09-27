@@ -12,34 +12,23 @@
     
     <div class="panel">
       <h3>Select a Directory of Photos</h3>
-      <p>Choose a folder containing image files. All valid image files (JPEG, PNG, GIF, etc.) will be imported.</p>
+      <p>Choose a folder containing image files. All valid image files (JPEG, PNG, GIF, etc.) will be imported in the background.</p>
       
       <div class="form_group">
         <label for="directory-input">Select Directory:</label>
         <input type="file" 
                id="directory-input" 
+               name="photos[][file]"
                webkitdirectory 
                directory 
                multiple 
                accept="image/*"
-               style="margin: 10px 0;">
-        
-        <!-- Hidden container for filtered files that will actually be submitted -->
-        <div id="filtered-files-container" style="display: none;"></div>
+               style="margin: 10px 0;"
+               required>
       </div>
       
-      <!-- Scanning progress indicator -->
-      <div id="scanning-progress" style="margin: 20px 0; display: none;">
-        <h4>Scanning Directory...</h4>
-        <div style="background: #f0f0f0; border-radius: 10px; padding: 3px; margin: 10px 0;">
-          <div id="progress-bar" style="background: #007cba; height: 20px; border-radius: 8px; width: 0%; transition: width 0.3s ease;"></div>
-        </div>
-        <p id="progress-text" style="font-size: 14px; color: #666; margin: 5px 0;">Preparing to scan files...</p>
-        <p style="font-size: 12px; color: #999;">Please wait while we process the directory contents.</p>
-      </div>
-
       <div id="file-preview" style="margin: 20px 0; display: none;">
-        <h4>Files to Import:</h4>
+        <h4>Files Selected:</h4>
         <div id="file-list" style="max-height: 300px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; background: #f9f9f9;">
         </div>
         <p id="file-count" style="font-weight: bold; margin-top: 10px;"></p>
@@ -98,33 +87,41 @@
 }
 
 .btn-primary:disabled {
-  background: #ccc;
+  background: #cccccc;
   cursor: not-allowed;
 }
 
 .btn-secondary {
-  background: #666;
+  background: #6c757d;
   color: white;
 }
 
-.file-item {
-  padding: 5px;
-  border-bottom: 1px solid #eee;
-  display: flex;
-  justify-content: space-between;
+.btn:hover:not(:disabled) {
+  opacity: 0.9;
 }
 
-.file-item:last-child {
-  border-bottom: none;
+.file-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid #eee;
+  background: white;
+  margin: 2px 0;
+  border-radius: 3px;
 }
 
 .file-name {
-  font-weight: bold;
+  flex: 1;
+  font-size: 13px;
+  word-break: break-all;
 }
 
 .file-size {
+  font-size: 12px;
   color: #666;
-  font-size: 0.9em;
+  margin-left: 10px;
+  white-space: nowrap;
 }
 </style>
 
@@ -136,217 +133,69 @@ document.addEventListener('DOMContentLoaded', function() {
   const fileCount = document.getElementById('file-count');
   const importButton = document.getElementById('import-button');
   
-  // Show progress immediately when directory input is clicked
-  directoryInput.addEventListener('click', function(e) {
-    const scanningProgress = document.getElementById('scanning-progress');
-    const progressBar = document.getElementById('progress-bar');
-    const progressText = document.getElementById('progress-text');
-    
-    // Show progress immediately
-    scanningProgress.style.display = 'block';
-    filePreview.style.display = 'none';
-    importButton.disabled = true;
-    
-    progressBar.style.width = '5%';
-    progressText.textContent = 'Reading directory structure...';
-  });
-
   directoryInput.addEventListener('change', function(e) {
-    const scanningProgress = document.getElementById('scanning-progress');
-    const progressBar = document.getElementById('progress-bar');
-    const progressText = document.getElementById('progress-text');
+    const files = Array.from(e.target.files);
+    const totalFiles = files.length;
     
-    // Keep progress visible and update
-    progressBar.style.width = '15%';
-    progressText.textContent = 'Directory loaded, analyzing files...';
+    if (totalFiles === 0) {
+      filePreview.style.display = 'none';
+      importButton.disabled = true;
+      return;
+    }
     
-    // Use requestAnimationFrame to ensure UI updates
-    requestAnimationFrame(() => {
-      const files = Array.from(e.target.files);
-      
-      if (files.length === 0) {
-        scanningProgress.style.display = 'none';
-        return;
-      }
-      
-      progressText.textContent = `Analyzing ${files.length} files...`;
-      progressBar.style.width = '20%';
-      
-      // Define acceptable image MIME types
-      const acceptableImageTypes = [
-        'image/jpeg',
-        'image/jpg', 
-        'image/png',
-        'image/gif',
-        'image/bmp',
-        'image/tiff',
-        'image/webp',
-        'image/heic',
-        'image/heif'
-      ];
-      
-      // Process files in smaller batches with faster updates
-      const imageFiles = [];
-      const batchSize = 25; // Smaller batches for more responsive updates
-      let processedCount = 0;
-      
-      function processBatch(startIndex) {
-        const endIndex = Math.min(startIndex + batchSize, files.length);
-        const startTime = performance.now();
-        
-        for (let i = startIndex; i < endIndex; i++) {
-          const file = files[i];
-          
-          // Quick check - just extension for speed
-          const extension = file.name.toLowerCase().split('.').pop();
-          const acceptableExtensions = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'tif', 'webp', 'heic', 'heif'];
-          
-          if (acceptableExtensions.includes(extension)) {
-            imageFiles.push(file);
-          }
-          
-          processedCount++;
-          
-          // Break if processing is taking too long (>5ms)
-          if (performance.now() - startTime > 5) {
-            break;
-          }
-        }
-        
-        // Update progress more smoothly
-        const progress = Math.min((processedCount / files.length) * 75 + 20, 95); // 20-95%
-        progressBar.style.width = progress + '%';
-        progressText.textContent = `Processed ${processedCount} of ${files.length} files... (${imageFiles.length} images found)`;
-        
-        if (processedCount < files.length) {
-          // Continue processing next batch immediately
-          requestAnimationFrame(() => processBatch(processedCount));
-        } else {
-          // Finished processing all files
-          requestAnimationFrame(() => buildFileList(imageFiles, files.length));
-        }
-      }
-      
-      // Start processing with a small delay to show the updated progress
-      setTimeout(() => processBatch(0), 50);
+    // Count image files
+    const validExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif', '.webp', '.heic', '.heif'];
+    const imageFiles = files.filter(file => {
+      const fileName = file.name.toLowerCase();
+      return validExtensions.some(ext => fileName.endsWith(ext)) && file.type.startsWith('image/');
     });
-  });
-  
-  function buildFileList(imageFiles, totalFiles) {
-    const scanningProgress = document.getElementById('scanning-progress');
-    const progressBar = document.getElementById('progress-bar');
-    const progressText = document.getElementById('progress-text');
-    const filteredContainer = document.getElementById('filtered-files-container');
     
-    // Clear previous filtered files
-    filteredContainer.innerHTML = '';
-    
-    progressBar.style.width = '95%';
-    progressText.textContent = 'Building file list...';
-    
+    // Show file preview
     if (imageFiles.length > 0) {
       fileList.innerHTML = '';
       
-      // Process DOM creation in batches to maintain responsiveness
-      const domBatchSize = 20; // Create 20 elements at a time
-      let processedFiles = 0;
+      // Show first 20 files as preview
+      const previewFiles = imageFiles.slice(0, 20);
+      previewFiles.forEach(file => {
+        const fileItem = document.createElement('div');
+        fileItem.className = 'file-item';
+        
+        const fileName = document.createElement('span');
+        fileName.className = 'file-name';
+        fileName.textContent = file.webkitRelativePath || file.name;
+        
+        const fileSize = document.createElement('span');
+        fileSize.className = 'file-size';
+        fileSize.textContent = formatFileSize(file.size);
+        
+        fileItem.appendChild(fileName);
+        fileItem.appendChild(fileSize);
+        fileList.appendChild(fileItem);
+      });
       
-      function createBatch(startIndex) {
-        const endIndex = Math.min(startIndex + domBatchSize, imageFiles.length);
-        const fragment = document.createDocumentFragment();
-        const hiddenFragment = document.createDocumentFragment();
-        
-        for (let i = startIndex; i < endIndex; i++) {
-          const file = imageFiles[i];
-          
-          // Create the display item
-          const fileItem = document.createElement('div');
-          fileItem.className = 'file-item';
-          
-          const fileName = document.createElement('span');
-          fileName.className = 'file-name';
-          fileName.textContent = file.webkitRelativePath || file.name;
-          
-          const fileSize = document.createElement('span');
-          fileSize.className = 'file-size';
-          fileSize.textContent = formatFileSize(file.size);
-          
-          fileItem.appendChild(fileName);
-          fileItem.appendChild(fileSize);
-          fragment.appendChild(fileItem);
-          
-          // Create hidden file input for this specific file
-          const hiddenInput = document.createElement('input');
-          hiddenInput.type = 'file';
-          hiddenInput.name = `photos[][file]`;
-          hiddenInput.style.display = 'none';
-          
-          // Create a new FileList containing only this file
-          const dataTransfer = new DataTransfer();
-          dataTransfer.items.add(file);
-          hiddenInput.files = dataTransfer.files;
-          
-          hiddenFragment.appendChild(hiddenInput);
-          processedFiles++;
-        }
-        
-        // Append batches to DOM
-        fileList.appendChild(fragment);
-        filteredContainer.appendChild(hiddenFragment);
-        
-        // Update progress
-        const buildProgress = (processedFiles / imageFiles.length) * 5 + 95; // 95-100%
-        progressBar.style.width = buildProgress + '%';
-        progressText.textContent = `Building list... (${processedFiles}/${imageFiles.length} files processed)`;
-        
-        if (endIndex < imageFiles.length) {
-          // Continue with next batch
-          requestAnimationFrame(() => createBatch(endIndex));
-        } else {
-          // Finished creating all elements
-          finishBuild();
-        }
+      if (imageFiles.length > 20) {
+        const moreItem = document.createElement('div');
+        moreItem.style.cssText = 'padding: 10px; text-align: center; color: #666; font-style: italic;';
+        moreItem.textContent = `... and ${imageFiles.length - 20} more files`;
+        fileList.appendChild(moreItem);
       }
       
-      function finishBuild() {
-        const skippedFiles = totalFiles - imageFiles.length;
-        
-        let countText = `${imageFiles.length} image file(s) found`;
-        if (skippedFiles > 0) {
-          countText += ` (${skippedFiles} non-image file(s) skipped)`;
-        }
-        fileCount.textContent = countText;
-        
-        // Complete progress
-        progressBar.style.width = '100%';
-        progressText.textContent = 'Scan complete!';
-        
-        // Hide progress and show results
-        setTimeout(() => {
-          scanningProgress.style.display = 'none';
-          filePreview.style.display = 'block';
-          importButton.disabled = false;
-        }, 500);
+      const skippedFiles = totalFiles - imageFiles.length;
+      let countText = `${imageFiles.length} image file(s) ready for import`;
+      if (skippedFiles > 0) {
+        countText += ` (${skippedFiles} non-image file(s) will be skipped)`;
       }
+      fileCount.textContent = countText;
       
-      // Start building in batches
-      requestAnimationFrame(() => createBatch(0));
-      
+      filePreview.style.display = 'block';
+      importButton.disabled = false;
     } else {
-      // No valid images found
-      fileCount.textContent = `No valid image files found in selected directory (${totalFiles} file(s) skipped)`;
+      fileCount.textContent = `No valid image files found in selected directory (${totalFiles} file(s) will be skipped)`;
       fileList.innerHTML = '<p style="color: #666; font-style: italic;">No valid image files (.jpg, .png, .gif, .bmp, .tiff, .webp, .heic) found in the selected directory.</p>';
-      
-      progressBar.style.width = '100%';
-      progressText.textContent = 'Scan complete - no images found.';
-      
-      setTimeout(() => {
-        scanningProgress.style.display = 'none';
-        filePreview.style.display = 'block';
-        importButton.disabled = true;
-      }, 500);
+      filePreview.style.display = 'block';
+      importButton.disabled = true;
     }
-  }
+  });
   
   function formatFileSize(bytes) {
     if (bytes === 0) return '0 Bytes';
@@ -356,49 +205,74 @@ document.addEventListener('DOMContentLoaded', function() {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   }
   
-  // Form submission handling with chunked uploads
+  // Handle form submission with proper chunked uploads
   document.getElementById('import-photos-form').addEventListener('submit', function(e) {
     e.preventDefault();
     
-    const filteredContainer = document.getElementById('filtered-files-container');
-    const hiddenInputs = filteredContainer.querySelectorAll('input[type="file"]');
-    
-    if (hiddenInputs.length === 0) {
-      alert('No files selected for import.');
+    const files = directoryInput.files;
+    if (!files || files.length === 0) {
+      alert('Please select a directory containing photos.');
       return;
     }
     
-    // Convert NodeList to Array and get files
-    const filesToUpload = Array.from(hiddenInputs)
-      .map(input => input.files && input.files.length > 0 ? input.files[0] : null)
-      .filter(file => file !== null);
+    // Filter to image files only
+    const validExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif', '.webp', '.heic', '.heif'];
+    const imageFiles = Array.from(files).filter(file => {
+      const fileName = file.name.toLowerCase();
+      return validExtensions.some(ext => fileName.endsWith(ext)) && file.type.startsWith('image/');
+    });
     
-    if (filesToUpload.length === 0) {
-      alert('No valid files to upload.');
+    if (imageFiles.length === 0) {
+      alert('No valid image files selected for import.');
       return;
     }
     
-    // Start chunked upload
-    startChunkedUpload(filesToUpload);
+    // Show immediate feedback
+    showUploadFeedback(imageFiles.length);
+    
+    // Start chunked upload (user stays on page)
+    startChunkedUpload(imageFiles);
   });
   
+  let uploadInProgress = false;
+  let uploadCancelled = false;
+  let currentUploadController = null;
+
   function startChunkedUpload(files) {
-    const chunkSize = 15; // Upload 15 files at a time
+    const chunkSize = 10; // Smaller chunks to avoid multipart limits
     const totalFiles = files.length;
-    let currentChunk = 0;
     let uploadedCount = 0;
     let errorCount = 0;
+    let currentChunk = 0;
+    const totalChunks = Math.ceil(totalFiles / chunkSize);
     
-    // Show upload progress
-    showUploadProgress();
+    uploadInProgress = true;
+    uploadCancelled = false;
+    
+    // Add beforeunload warning to prevent accidental navigation
+    const beforeUnloadHandler = function(e) {
+      if (uploadInProgress) {
+        e.preventDefault();
+        e.returnValue = 'Upload in progress. Are you sure you want to leave?';
+        return 'Upload in progress. Are you sure you want to leave?';
+      }
+    };
+    window.addEventListener('beforeunload', beforeUnloadHandler);
+    
+    // Store handler reference for cleanup
+    window.currentBeforeUnloadHandler = beforeUnloadHandler;
     
     function uploadChunk(startIndex) {
+      if (uploadCancelled) {
+        console.log('Upload cancelled by user');
+        return;
+      }
+      
       const endIndex = Math.min(startIndex + chunkSize, totalFiles);
       const chunkFiles = files.slice(startIndex, endIndex);
-      const chunkNumber = Math.floor(startIndex / chunkSize) + 1;
-      const totalChunks = Math.ceil(totalFiles / chunkSize);
+      currentChunk = Math.floor(startIndex / chunkSize) + 1;
       
-      updateUploadProgress(uploadedCount, totalFiles, `Uploading batch ${chunkNumber} of ${totalChunks}...`);
+      updateUploadFeedback(uploadedCount, totalFiles, `Uploading batch ${currentChunk} of ${totalChunks}...`);
       
       const formData = new FormData();
       
@@ -411,42 +285,50 @@ document.addEventListener('DOMContentLoaded', function() {
       const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
       formData.append('authenticity_token', csrfToken);
       
+      // Create abort controller for this request
+      currentUploadController = new AbortController();
+      
       // Upload this chunk
       fetch('/family/photos/import_photos', {
         method: 'POST',
-        body: formData
+        body: formData,
+        signal: currentUploadController.signal
       }).then(response => {
         if (response.ok) {
+          return response.json();
+        } else {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+      }).then(data => {
+        if (data.status === 'success') {
           uploadedCount += chunkFiles.length;
-          updateUploadProgress(uploadedCount, totalFiles, `Batch ${chunkNumber} completed`);
+          updateUploadFeedback(uploadedCount, totalFiles, `Batch ${currentChunk} completed successfully`);
           
-          // Upload next chunk
-          if (endIndex < totalFiles) {
-            setTimeout(() => uploadChunk(endIndex), 500); // Small delay between chunks
-          } else {
-            // All chunks uploaded
-            finishUpload(uploadedCount, errorCount);
+          // Continue with next chunk
+          if (endIndex < totalFiles && !uploadCancelled) {
+            setTimeout(() => uploadChunk(endIndex), 1000); // 1 second delay between chunks
+          } else if (endIndex >= totalFiles) {
+            // Upload complete
+            uploadComplete(uploadedCount, errorCount, totalFiles);
           }
         } else {
-          errorCount += chunkFiles.length;
-          console.error(`Chunk ${chunkNumber} failed:`, response.statusText);
-          
-          // Continue with next chunk even if this one failed
-          if (endIndex < totalFiles) {
-            setTimeout(() => uploadChunk(endIndex), 500);
-          } else {
-            finishUpload(uploadedCount, errorCount);
-          }
+          throw new Error(data.message || 'Upload failed');
         }
       }).catch(error => {
+        if (error.name === 'AbortError') {
+          console.log('Upload aborted');
+          return;
+        }
+        
         errorCount += chunkFiles.length;
-        console.error(`Chunk ${chunkNumber} error:`, error);
+        console.error(`Chunk ${currentChunk} failed:`, error);
+        updateUploadFeedback(uploadedCount, totalFiles, `Batch ${currentChunk} failed: ${error.message}`);
         
         // Continue with next chunk even if this one failed
-        if (endIndex < totalFiles) {
-          setTimeout(() => uploadChunk(endIndex), 500);
-        } else {
-          finishUpload(uploadedCount, errorCount);
+        if (endIndex < totalFiles && !uploadCancelled) {
+          setTimeout(() => uploadChunk(endIndex), 2000); // Longer delay after error
+        } else if (endIndex >= totalFiles) {
+          uploadComplete(uploadedCount, errorCount, totalFiles);
         }
       });
     }
@@ -455,58 +337,116 @@ document.addEventListener('DOMContentLoaded', function() {
     uploadChunk(0);
   }
   
-  function showUploadProgress() {
-    // Hide file preview and show upload progress
-    document.getElementById('file-preview').style.display = 'none';
+  function uploadComplete(uploaded, errors, total) {
+    uploadInProgress = false;
     
-    // Create upload progress UI
-    const uploadProgress = document.createElement('div');
-    uploadProgress.id = 'upload-progress';
-    uploadProgress.innerHTML = `
-      <div style="background: #f9f9f9; padding: 20px; border-radius: 8px; margin: 20px 0;">
-        <h3 style="margin: 0 0 15px 0; color: #333;">Enqueuing Photos to Load...</h3>
-        <div style="background: #e0e0e0; border-radius: 10px; overflow: hidden; height: 20px; margin-bottom: 10px;">
-          <div id="upload-progress-bar" style="background: linear-gradient(90deg, #4CAF50, #45a049); height: 100%; width: 0%; transition: width 0.3s ease;"></div>
+    // Remove beforeunload warning
+    if (window.currentBeforeUnloadHandler) {
+      window.removeEventListener('beforeunload', window.currentBeforeUnloadHandler);
+      window.currentBeforeUnloadHandler = null;
+    }
+    
+    const feedback = document.getElementById('upload-feedback');
+    if (feedback) {
+      if (errors === 0) {
+        feedback.innerHTML = `
+          <div style="background: #d4edda; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #28a745;">
+            <h3 style="margin: 0 0 15px 0; color: #155724;">✅ Upload Complete!</h3>
+            <p style="color: #155724; margin-bottom: 10px;">Successfully uploaded ${uploaded} files.</p>
+            <p style="color: #666; font-size: 13px;">Processing photos in the background. You can monitor progress on the dashboard.</p>
+            <div style="margin-top: 15px;">
+              <button onclick="window.location.href='/family'" style="background: #28a745; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer;">Go to Dashboard</button>
+            </div>
+          </div>
+        `;
+      } else {
+        feedback.innerHTML = `
+          <div style="background: #f8d7da; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #dc3545;">
+            <h3 style="margin: 0 0 15px 0; color: #721c24;">⚠️ Upload Completed with Errors</h3>
+            <p style="color: #721c24; margin-bottom: 10px;">Uploaded ${uploaded} files, ${errors} failed.</p>
+            <p style="color: #666; font-size: 13px;">Some files may have failed to upload. Check the dashboard for details.</p>
+            <div style="margin-top: 15px;">
+              <button onclick="window.location.href='/family'" style="background: #dc3545; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer;">Go to Dashboard</button>
+            </div>
+          </div>
+        `;
+      }
+    }
+  }
+  
+  function cancelUpload() {
+    if (uploadInProgress) {
+      uploadCancelled = true;
+      if (currentUploadController) {
+        currentUploadController.abort();
+      }
+      
+      const feedback = document.getElementById('upload-feedback');
+      if (feedback) {
+        feedback.innerHTML = `
+          <div style="background: #fff3cd; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #ffc107;">
+            <h3 style="margin: 0 0 15px 0; color: #856404;">⏹️ Upload Cancelled</h3>
+            <p style="color: #856404; margin-bottom: 10px;">Upload was cancelled by user.</p>
+            <div style="margin-top: 15px;">
+              <button onclick="location.reload()" style="background: #ffc107; color: #856404; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer;">Try Again</button>
+            </div>
+          </div>
+        `;
+      }
+      
+      // Re-enable form
+      const form = document.getElementById('import-photos-form');
+      if (form) {
+        form.style.opacity = '1';
+        form.style.pointerEvents = 'auto';
+      }
+    }
+  }
+  
+  function updateUploadFeedback(uploaded, total, message) {
+    const progressBar = document.getElementById('upload-progress-bar');
+    const progressText = document.getElementById('upload-progress-text');
+    
+    if (progressBar && progressText) {
+      const percentage = Math.round((uploaded / total) * 100);
+      progressBar.style.width = percentage + '%';
+      progressBar.textContent = percentage + '%';
+      progressText.textContent = `${message} (${uploaded}/${total} files - ${percentage}%)`;
+    }
+  }
+  
+  function showUploadFeedback(totalFiles) {
+    // Hide file preview
+    filePreview.style.display = 'none';
+    
+    // Create upload feedback UI
+    const uploadFeedback = document.createElement('div');
+    uploadFeedback.id = 'upload-feedback';
+    uploadFeedback.innerHTML = `
+      <div style="background: #e8f4fd; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #007cba;">
+        <h3 style="margin: 0 0 15px 0; color: #007cba;">📸 Photo Import in Progress</h3>
+        <div style="background: #ffffff; border-radius: 10px; overflow: hidden; height: 24px; margin-bottom: 15px; border: 1px solid #007cba;">
+          <div id="upload-progress-bar" style="background: linear-gradient(90deg, #007cba, #0056a3); height: 100%; width: 0%; transition: width 0.3s ease; display: flex; align-items: center; justify-content: center; color: white; font-size: 12px; font-weight: bold;"></div>
         </div>
-        <div id="upload-progress-text" style="color: #666; font-size: 14px;">Preparing upload...</div>
+        <div id="upload-progress-text" style="color: #007cba; font-size: 14px; margin-bottom: 10px;">Preparing upload...</div>
+        <div style="color: #666; font-size: 13px; margin-top: 15px;">
+          <p>⚠️ <strong>Please stay on this page until upload completes</strong></p>
+          <p>📁 Uploading ${totalFiles} files in small batches</p>
+          <p>⏱️ This may take a few minutes for large directories</p>
+        </div>
+        <div id="upload-cancel" style="margin-top: 15px;">
+          <button type="button" onclick="cancelUpload()" style="background: #dc3545; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">Cancel Upload</button>
+        </div>
       </div>
     `;
     
     // Insert after the form
     const form = document.getElementById('import-photos-form');
-    form.insertAdjacentElement('afterend', uploadProgress);
+    form.insertAdjacentElement('afterend', uploadFeedback);
     
     // Disable form
-    form.style.opacity = '0.5';
+    form.style.opacity = '0.3';
     form.style.pointerEvents = 'none';
-  }
-  
-  function updateUploadProgress(uploaded, total, message) {
-    const progressBar = document.getElementById('upload-progress-bar');
-    const progressText = document.getElementById('upload-progress-text');
-    
-    if (progressBar && progressText) {
-      const percentage = (uploaded / total) * 100;
-      progressBar.style.width = percentage + '%';
-      progressText.textContent = `${message} (${uploaded}/${total} files uploaded - ${Math.round(percentage)}%)`;
-    }
-  }
-  
-  function finishUpload(uploadedCount, errorCount) {
-    const progressText = document.getElementById('upload-progress-text');
-    
-    if (progressText) {
-      if (errorCount > 0) {
-        progressText.innerHTML = `Upload completed with some errors.<br>Successfully uploaded: ${uploadedCount} files<br>Failed: ${errorCount} files<br><em>Refreshing page...</em>`;
-      } else {
-        progressText.innerHTML = `All files uploaded successfully!<br>${uploadedCount} files processed<br><em>Refreshing page...</em>`;
-      }
-    }
-    
-    // Refresh page after a delay
-    setTimeout(() => {
-      window.location.reload();
-    }, 2000);
   }
 });
 </script>

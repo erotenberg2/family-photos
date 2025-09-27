@@ -28,7 +28,7 @@ class ImagesController < ApplicationController
 
   def find_photo
     @photo = Photo.find(params[:id])
-  rescue ActiveRecord::RecordNotFound
+  rescue ActiveRecord::RecordNotFoun
     head :not_found
   end
 end
