@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_09_28_054609) do
+ActiveRecord::Schema[8.0].define(version: 2025_09_28_173221) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -102,8 +102,6 @@ ActiveRecord::Schema[8.0].define(version: 2025_09_28_054609) do
     t.string "original_filename"
     t.string "content_type"
     t.string "md5_hash", null: false
-    t.integer "width"
-    t.integer "height"
     t.datetime "taken_at"
     t.bigint "uploaded_by_id", null: false
     t.bigint "user_id", null: false
@@ -119,8 +117,20 @@ ActiveRecord::Schema[8.0].define(version: 2025_09_28_054609) do
     t.string "upload_session_id"
     t.string "upload_batch_id"
     t.text "client_file_path"
+    t.datetime "datetime_source_last_modified"
+    t.datetime "datetime_intrinsic"
+    t.datetime "datetime_user"
+    t.datetime "datetime_inferred"
+    t.decimal "latitude", precision: 10, scale: 7
+    t.decimal "longitude", precision: 10, scale: 7
     t.index ["created_at"], name: "index_media_on_created_at"
+    t.index ["datetime_inferred"], name: "index_media_on_datetime_inferred"
+    t.index ["datetime_intrinsic"], name: "index_media_on_datetime_intrinsic"
+    t.index ["datetime_source_last_modified"], name: "index_media_on_datetime_source_last_modified"
+    t.index ["datetime_user"], name: "index_media_on_datetime_user"
     t.index ["file_path"], name: "index_media_on_file_path", unique: true
+    t.index ["latitude"], name: "index_media_on_latitude"
+    t.index ["longitude"], name: "index_media_on_longitude"
     t.index ["md5_hash"], name: "index_media_on_md5_hash", unique: true
     t.index ["mediable_type", "mediable_id"], name: "index_media_on_mediable"
     t.index ["medium_type"], name: "index_media_on_medium_type"
@@ -157,6 +167,10 @@ ActiveRecord::Schema[8.0].define(version: 2025_09_28_054609) do
     t.string "preview_path"
     t.integer "preview_width"
     t.integer "preview_height"
+    t.integer "width"
+    t.integer "height"
+    t.index ["height"], name: "index_photos_on_height"
+    t.index ["width"], name: "index_photos_on_width"
   end
 
   create_table "upload_logs", force: :cascade do |t|

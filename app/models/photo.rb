@@ -37,16 +37,16 @@ class Photo < ApplicationRecord
   
   # Delegate generic media attributes to Medium
   delegate :file_path, :file_size, :original_filename, :content_type, :md5_hash,
-           :width, :height, :taken_at, :uploaded_by, :user, :file_size_human,
+           :taken_at, :uploaded_by, :user, :file_size_human,
            :taken_date, :file_exists?, to: :medium, allow_nil: true
            
   # Note: Medium creates Photo, not the other way around
 
   def self.ransackable_attributes(auth_object = nil)
     ["camera_make", "camera_model", "created_at", "description", "exif_data", 
-     "id", "latitude", "longitude", "preview_height", "preview_path", 
+     "height", "id", "latitude", "longitude", "preview_height", "preview_path", 
      "preview_width", "thumbnail_height", "thumbnail_path", 
-     "thumbnail_width", "title", "updated_at"]
+     "thumbnail_width", "title", "updated_at", "width"]
   end
 
   def self.ransackable_associations(auth_object = nil)
@@ -69,6 +69,30 @@ class Photo < ApplicationRecord
   # Callbacks removed - all processing now handled explicitly in post-processing
   # before_save :extract_metadata_from_exif
   # after_create :generate_thumbnail
+  
+  # Intrinsic datetime method - returns the datetime from EXIF data
+  def datetime_intrinsic
+    return nil unless exif_data.present?
+    
+    # Try to get datetime from EXIF data
+    exif_datetime = exif_data[:date_time_original] || exif_data['date_time_original']
+    
+    if exif_datetime.present?
+      # Parse the EXIF datetime string (usually in format "YYYY:MM:DD HH:MM:SS")
+      begin
+        Time.strptime(exif_datetime, "%Y:%m:%d %H:%M:%S")
+      rescue ArgumentError
+        # Try alternative formats if the standard format fails
+        begin
+          Time.parse(exif_datetime)
+        rescue ArgumentError
+          nil
+        end
+      end
+    else
+      nil
+    end
+  end
 
   # Class methods
   def self.duplicate_by_hash(hash)
@@ -327,34 +351,84 @@ class Photo < ApplicationRecord
     end
     
     # GPS coordinates are photo-specific and stay on the photo record
-    self.latitude = extract_gps_coordinate(exif_info, :gps_latitude, exif_info[:gps_latitude_ref])
-    self.longitude = extract_gps_coordinate(exif_info, :gps_longitude, exif_info[:gps_longitude_ref])
+    # Handle both string and symbol keys for GPS data
+    gps_lat_key = exif_info.key?('GPSLatitude') ? 'GPSLatitude' : :gps_latitude
+    gps_lon_key = exif_info.key?('GPSLongitude') ? 'GPSLongitude' : :gps_longitude
+    gps_lat_ref_key = exif_info.key?('GPSLatitudeRef') ? 'GPSLatitudeRef' : :gps_latitude_ref
+    gps_lon_ref_key = exif_info.key?('GPSLongitudeRef') ? 'GPSLongitudeRef' : :gps_longitude_ref
+    
+    self.latitude = extract_gps_coordinate(exif_info, gps_lat_key, exif_info[gps_lat_ref_key])
+    self.longitude = extract_gps_coordinate(exif_info, gps_lon_key, exif_info[gps_lon_ref_key])
     
     # Note: Changes are saved by explicit update_columns call in post-processing
   end
 
-  def extract_gps_coordinate(exif_hash, coord_key, ref_key)
+  def extract_gps_coordinate(exif_hash, coord_key, ref_value)
     coord = exif_hash[coord_key]
-    ref = exif_hash[ref_key]
+    ref = ref_value
+    
     
     return nil unless coord && ref
     
     # Handle different coordinate formats that might be in EXIF
     case coord
     when Numeric
-      ref == 'S' || ref == 'W' ? -coord : coord
+      result = ref == 'S' || ref == 'W' ? -coord : coord
+      result
     when Array
       # DMS format [degrees, minutes, seconds]
       decimal = coord[0] + coord[1]/60.0 + coord[2]/3600.0
-      ref == 'S' || ref == 'W' ? -decimal : decimal
+      result = ref == 'S' || ref == 'W' ? -decimal : decimal
+      result
+    when String
+      # Handle HEIC format like "37/1,52/1,675/100" (degrees/minutes/seconds with fractions)
+      result = parse_heic_gps_string(coord, ref)
+      result
     else
       coord
     end
-  rescue
+  rescue => e
+    Rails.logger.error "GPS extraction error: #{e.message}"
     nil
   end
 
   private
+
+  # Parse HEIC GPS coordinate string format like "37/1,52/1,675/100"
+  def parse_heic_gps_string(coord_string, ref)
+    # Split by comma to get degrees, minutes, seconds components
+    parts = coord_string.split(',')
+    return nil unless parts.length == 3
+    
+    # Parse each component (e.g., "37/1" -> 37.0, "675/100" -> 6.75)
+    degrees = parse_fraction(parts[0])
+    minutes = parse_fraction(parts[1]) 
+    seconds = parse_fraction(parts[2])
+    
+    return nil unless degrees && minutes && seconds
+    
+    # Convert to decimal degrees
+    decimal = degrees + minutes/60.0 + seconds/3600.0
+    
+    # Apply hemisphere reference
+    ref == 'S' || ref == 'W' ? -decimal : decimal
+  rescue => e
+    Rails.logger.error "Failed to parse HEIC GPS string '#{coord_string}': #{e.message}"
+    nil
+  end
+  
+  # Parse fraction string like "37/1" or "675/100"
+  def parse_fraction(fraction_string)
+    return nil unless fraction_string
+    
+    if fraction_string.include?('/')
+      numerator, denominator = fraction_string.split('/').map(&:to_f)
+      return nil if denominator == 0
+      numerator / denominator
+    else
+      fraction_string.to_f
+    end
+  end
 
   def generate_image_variant(variant_type)
     # Calculate size and paths based on variant type

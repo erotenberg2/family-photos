@@ -36,9 +36,9 @@ class Medium < ApplicationRecord
   }
 
   def self.ransackable_attributes(auth_object = nil)
-    ["client_file_path", "content_type", "created_at", "file_path", "file_size", "height", "id", 
-     "md5_hash", "medium_type", "original_filename", "taken_at", "updated_at", 
-     "uploaded_by_id", "user_id", "width"]
+    ["client_file_path", "content_type", "created_at", "datetime_inferred", "datetime_intrinsic", "datetime_source_last_modified", 
+     "datetime_user", "file_path", "file_size", "id", "latitude", "longitude", "md5_hash", "medium_type", "original_filename", 
+     "taken_at", "updated_at", "uploaded_by_id", "user_id"]
   end
 
   def self.ransackable_associations(auth_object = nil)
@@ -123,6 +123,32 @@ class Medium < ApplicationRecord
     file_path.present? && File.exist?(file_path)
   end
 
+  # Get location from mediable's intrinsic file info (e.g., EXIF data)
+  def location
+    return nil unless mediable.present?
+    
+    case medium_type
+    when 'photo'
+      # For photos, get location from Photo model's latitude/longitude
+      if mediable.respond_to?(:latitude) && mediable.respond_to?(:longitude)
+        lat = mediable.latitude
+        lon = mediable.longitude
+        return [lat, lon] if lat.present? && lon.present?
+      end
+    when 'audio', 'video'
+      # For future audio/video support, could extract from metadata
+      # For now, return nil
+      nil
+    else
+      nil
+    end
+  end
+
+  # Check if location is available
+  def has_location?
+    location.present?
+  end
+
   # Generic post-processing status check
   # Delegates to mediable's post_processed? method if available
   def post_processed?
@@ -202,11 +228,8 @@ class Medium < ApplicationRecord
     
     upload_completed_at = Time.current
     
-    # Extract dimensions for images/videos
-    width, height = extract_dimensions(file_path, uploaded_file.content_type)
-    
-    # Create the specific media type record first
-    mediable = create_mediable_record(medium_type, uploaded_file, user)
+    # Create the specific media type record first (with dimensions)
+    mediable = create_mediable_record(medium_type, uploaded_file, user, file_path)
     return { error: "Failed to create #{medium_type} record" } unless mediable
     
     # Create Medium record with timing information
@@ -216,13 +239,12 @@ class Medium < ApplicationRecord
       original_filename: uploaded_file.original_filename,
       content_type: uploaded_file.content_type,
       md5_hash: md5_hash,
-      width: width,
-      height: height,
       medium_type: medium_type,
       mediable: mediable,
       uploaded_by: user,
       user: user,
       client_file_path: client_file_path,
+      datetime_source_last_modified: extract_file_last_modified(uploaded_file),
       upload_started_at: upload_started_at,
       upload_completed_at: upload_completed_at,
       upload_batch_id: batch_id,
@@ -353,12 +375,17 @@ class Medium < ApplicationRecord
     end
   end
 
-  def self.create_mediable_record(medium_type, uploaded_file, user)
+  def self.create_mediable_record(medium_type, uploaded_file, user, file_path)
     case medium_type
     when 'photo'
+      # Extract dimensions for photos
+      width, height = extract_dimensions(file_path, uploaded_file.content_type)
+      
       Photo.create(
         title: File.basename(uploaded_file.original_filename, '.*').humanize,
-        description: nil
+        description: nil,
+        width: width,
+        height: height
       )
     when 'audio'
       # Audio.create(...) when we add Audio model
@@ -387,12 +414,28 @@ class Medium < ApplicationRecord
           latitude: photo.latitude,
           longitude: photo.longitude
         )
+        
+        # Get intrinsic datetime AFTER EXIF extraction
+        datetime_intrinsic = photo.datetime_intrinsic
+        Rails.logger.info "Extracted datetime_intrinsic: #{datetime_intrinsic} for #{medium.original_filename}"
+        
+        # Update Medium with intrinsic datetime
+        medium.update_columns(datetime_intrinsic: datetime_intrinsic) if datetime_intrinsic
+        
+        # Update Medium with location data from Photo
+        if photo.latitude.present? && photo.longitude.present?
+          medium.update_columns(latitude: photo.latitude, longitude: photo.longitude)
+        end
       end
       medium.mediable.generate_thumbnail if medium.mediable&.respond_to?(:generate_thumbnail)
     when 'audio'
       # Extract audio metadata when we add audio support
+      datetime_intrinsic = medium.mediable.datetime_intrinsic if medium.mediable&.respond_to?(:datetime_intrinsic)
+      medium.update_columns(datetime_intrinsic: datetime_intrinsic) if datetime_intrinsic
     when 'video'
       # Extract video metadata when we add video support
+      datetime_intrinsic = medium.mediable.datetime_intrinsic if medium.mediable&.respond_to?(:datetime_intrinsic)
+      medium.update_columns(datetime_intrinsic: datetime_intrinsic) if datetime_intrinsic
     end
     
     Rails.logger.info "Post-processing completed for: #{medium.original_filename}"
@@ -425,6 +468,19 @@ class Medium < ApplicationRecord
     
     Rails.logger.info "Batch post-processing completed. Processed: #{processed_count}, Errors: #{errors.length}"
     { processed_count: processed_count, errors: errors }
+  end
+
+  private
+
+  # Extract last modified time from uploaded file
+  # Note: ActionDispatch::Http::UploadedFile doesn't preserve the client's original
+  # file modification time. The tempfile will have the current time.
+  # For true client file modification time, we'd need to capture it in JavaScript
+  # and send it as a separate parameter.
+  def self.extract_file_last_modified(uploaded_file)
+    # For now, use current time as the source modification time
+    # This represents when the file was uploaded/processed
+    Time.current
   end
 
 end

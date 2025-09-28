@@ -71,21 +71,18 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
       end
     end
     
-    column "Title" do |medium|
-      medium.mediable&.title || "Untitled"
+    column "Location", sortable: false do |medium|
+      if medium.has_location?
+        content_tag :div, "📍", style: "font-size: 16px; text-align: center;", title: "Location available"
+      else
+        content_tag :div, "", style: "font-size: 16px; text-align: center;"
+      end
     end
     
     column :original_filename
     column :user
     column :uploaded_by
     column :taken_at
-    column "Dimensions" do |medium|
-      if medium.width && medium.height
-        "#{medium.width}×#{medium.height}"
-      else
-        "—"
-      end
-    end
     column "File Size" do |medium|
       medium.file_size_human
     end
@@ -166,14 +163,11 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
       row :file_size do |resource|
         resource.file_size_human
       end
-      row :dimensions do |resource|
-        if resource.width && resource.height
-          "#{resource.width} × #{resource.height} pixels"
-        else
-          "Not available"
-        end
-      end
       row :taken_at
+      row :datetime_source_last_modified
+      row :datetime_intrinsic
+      row :datetime_user
+      row :datetime_inferred
       row :user
       row :uploaded_by
       row :md5_hash
