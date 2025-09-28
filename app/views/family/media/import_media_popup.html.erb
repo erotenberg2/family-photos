@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Import Media</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="<%= form_authenticity_token %>">
+  
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background: #f8f9fa;
+      font-size: 14px;
+      line-height: 1.4;
+    }
+    
+    .popup-header {
+      background: #007cba;
+      color: white;
+      padding: 15px 20px;
+      margin: -20px -20px 20px -20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .popup-header h1 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 600;
+    }
+    
+    .close-btn {
+      background: rgba(255,255,255,0.2);
+      border: none;
+      color: white;
+      padding: 5px 10px;
+      border-radius: 3px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    
+    .close-btn:hover {
+      background: rgba(255,255,255,0.3);
+    }
+    
+    .compact-panel {
+      background: white;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 15px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    .compact-panel h3 {
+      margin: 0 0 15px 0;
+      font-size: 16px;
+      color: #333;
+    }
+    
+    .compact-panel p {
+      margin: 0 0 15px 0;
+      color: #666;
+      font-size: 13px;
+    }
+    
+    .form-group {
+      margin-bottom: 15px;
+    }
+    
+    .form-group label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 500;
+      color: #333;
+      font-size: 13px;
+    }
+    
+    .media-type-options {
+      display: flex;
+      gap: 15px;
+      flex-wrap: wrap;
+    }
+    
+    .media-type-options label {
+      display: flex;
+      align-items: center;
+      font-weight: normal;
+      cursor: pointer;
+      padding: 8px 12px;
+      background: #f8f9fa;
+      border-radius: 5px;
+      border: 2px solid transparent;
+      transition: all 0.2s ease;
+    }
+    
+    .media-type-options label:hover {
+      background: #e9ecef;
+    }
+    
+    .media-type-options input[type="radio"]:checked + span {
+      background: #007cba;
+      color: white;
+      border-radius: 3px;
+      padding: 2px 6px;
+    }
+    
+    .media-type-options input[type="radio"] {
+      margin-right: 8px;
+    }
+    
+    .directory-input {
+      width: 100%;
+      padding: 10px;
+      border: 2px dashed #dee2e6;
+      border-radius: 5px;
+      background: #f8f9fa;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    
+    .directory-input:hover {
+      border-color: #007cba;
+      background: #f0f8ff;
+    }
+    
+    .file-preview {
+      background: white;
+      border-radius: 5px;
+      padding: 15px;
+      margin-top: 15px;
+      border: 1px solid #dee2e6;
+    }
+    
+    .file-count {
+      font-weight: 600;
+      color: #007cba;
+      margin-bottom: 10px;
+    }
+    
+    .file-list {
+      max-height: 200px;
+      overflow-y: auto;
+      border: 1px solid #eee;
+      border-radius: 3px;
+      padding: 10px;
+      background: #fafafa;
+    }
+    
+    .file-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 8px;
+      margin: 2px 0;
+      background: white;
+      border-radius: 3px;
+      font-size: 12px;
+    }
+    
+    .file-name {
+      flex: 1;
+      word-break: break-all;
+    }
+    
+    .file-type {
+      background: #007cba;
+      color: white;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-size: 10px;
+      margin: 0 5px;
+    }
+    
+    .file-size {
+      color: #666;
+      font-size: 11px;
+      white-space: nowrap;
+    }
+    
+    .button-group {
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+      margin-top: 20px;
+    }
+    
+    .btn {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      transition: all 0.2s ease;
+    }
+    
+    .btn-primary {
+      background: #007cba;
+      color: white;
+    }
+    
+    .btn-primary:hover:not(:disabled) {
+      background: #0056a3;
+    }
+    
+    .btn-primary:disabled {
+      background: #cccccc;
+      cursor: not-allowed;
+    }
+    
+    .btn-secondary {
+      background: #6c757d;
+      color: white;
+    }
+    
+    .btn-secondary:hover {
+      background: #545b62;
+    }
+    
+    .upload-feedback {
+      margin-top: 20px;
+      padding: 15px;
+      border-radius: 5px;
+      font-size: 13px;
+    }
+    
+    .upload-feedback.success {
+      background: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+    
+    .upload-feedback.error {
+      background: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
+    
+    .upload-feedback.progress {
+      background: #e8f4fd;
+      color: #007cba;
+      border: 1px solid #007cba;
+    }
+    
+    .progress-bar {
+      background: #ffffff;
+      border-radius: 10px;
+      overflow: hidden;
+      height: 20px;
+      margin: 10px 0;
+      border: 1px solid #007cba;
+    }
+    
+    .progress-fill {
+      background: linear-gradient(90deg, #007cba, #0056a3);
+      height: 100%;
+      width: 0%;
+      transition: width 0.3s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: 11px;
+      font-weight: bold;
+    }
+    
+    .stay-on-page-warning {
+      background: #fff3cd;
+      color: #856404;
+      padding: 10px;
+      border-radius: 5px;
+      font-size: 12px;
+      margin-top: 10px;
+      border: 1px solid #ffeaa7;
+    }
+  </style>
+</head>
+<body>
+  <div class="popup-header">
+    <h1>📁 Import Media</h1>
+    <button class="close-btn" onclick="window.close()">✕ Close</button>
+  </div>
+
+  <div class="compact-panel">
+    <h3>Select Media Files to Import</h3>
+    <p>Choose a folder containing media files. Files will be filtered based on your type selection below.</p>
+    
+    <%= form_with url: import_media_family_media_path, method: :post, multipart: true, local: false, html: { id: 'import-media-form' } do |f| %>
+      
+      <div class="form-group">
+        <label>Media Types to Import:</label>
+        <div class="media-type-options">
+          <label>
+            <input type="radio" name="media_types[]" value="all" checked>
+            <span>📁 All Media</span>
+          </label>
+          <label>
+            <input type="radio" name="media_types[]" value="photo">
+            <span>📸 Photos Only</span>
+          </label>
+          <label>
+            <input type="radio" name="media_types[]" value="audio">
+            <span>🎵 Audio Only</span>
+          </label>
+          <label>
+            <input type="radio" name="media_types[]" value="video">
+            <span>🎬 Video Only</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="directory-input">Select Folder:</label>
+        <input type="file" 
+               id="directory-input" 
+               name="photos[][file]" 
+               webkitdirectory 
+               multiple 
+               required 
+               class="directory-input">
+      </div>
+
+      <div id="file-preview" class="file-preview" style="display: none;">
+        <div id="file-count" class="file-count"></div>
+        <div id="file-list" class="file-list"></div>
+      </div>
+
+      <div class="button-group">
+        <button type="button" class="btn btn-secondary" onclick="window.close()">Cancel</button>
+        <button type="submit" id="import-button" class="btn btn-primary" disabled>Import Media</button>
+      </div>
+      
+    <% end %>
+  </div>
+
+  <div id="upload-feedback"></div>
+
+  <script>
+    // Copy the existing JavaScript from import_media.html.erb but adapt for popup
+    document.addEventListener('DOMContentLoaded', function() {
+      const directoryInput = document.getElementById('directory-input');
+      const filePreview = document.getElementById('file-preview');
+      const fileList = document.getElementById('file-list');
+      const fileCount = document.getElementById('file-count');
+      const importButton = document.getElementById('import-button');
+      const mediaTypeInputs = document.querySelectorAll('input[name="media_types[]"]');
+      
+      let currentFiles = [];
+      let uploadInProgress = false;
+      let uploadStartTime = null;
+      let currentUploadController = null;
+      
+      // Media type definitions (same as original)
+      const mediaTypes = {
+        photo: {
+          extensions: ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif', '.webp', '.heic', '.heif'],
+          mimeTypes: ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/bmp', 'image/tiff', 'image/heic', 'image/heif', 'image/webp'],
+          emoji: '📸'
+        },
+        audio: {
+          extensions: ['.mp3', '.wav', '.aac', '.ogg', '.flac', '.m4a'],
+          mimeTypes: ['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/aac', 'audio/ogg', 'audio/flac'],
+          emoji: '🎵'
+        },
+        video: {
+          extensions: ['.mp4', '.mov', '.avi', '.mkv', '.webm'],
+          mimeTypes: ['video/mp4', 'video/mov', 'video/avi', 'video/mkv', 'video/webm'],
+          emoji: '🎬'
+        }
+      };
+
+      function getFileType(file) {
+        const extension = '.' + file.name.split('.').pop().toLowerCase();
+        const mimeType = file.type.toLowerCase();
+        
+        for (const [type, config] of Object.entries(mediaTypes)) {
+          if (config.extensions.includes(extension) || config.mimeTypes.includes(mimeType)) {
+            return type;
+          }
+        }
+        return null;
+      }
+
+      function filterFilesBySelection() {
+        const selectedType = document.querySelector('input[name="media_types[]"]:checked').value;
+        
+        if (selectedType === 'all') {
+          return currentFiles.map(file => ({ file, type: getFileType(file) })).filter(item => item.type);
+        } else {
+          return currentFiles.map(file => ({ file, type: getFileType(file) }))
+                           .filter(item => item.type === selectedType);
+        }
+      }
+
+      function updateFilePreview() {
+        if (currentFiles.length === 0) {
+          filePreview.style.display = 'none';
+          importButton.disabled = true;
+          return;
+        }
+
+        const filteredFiles = filterFilesBySelection();
+        
+        if (filteredFiles.length > 0) {
+          fileList.innerHTML = '';
+          
+          // Show first 10 files as preview (more compact)
+          const previewFiles = filteredFiles.slice(0, 10);
+          previewFiles.forEach(item => {
+            const fileItem = document.createElement('div');
+            fileItem.className = 'file-item';
+            
+            const fileName = document.createElement('div');
+            fileName.className = 'file-name';
+            fileName.textContent = item.file.name;
+            
+            const fileType = document.createElement('div');
+            fileType.className = 'file-type';
+            fileType.textContent = mediaTypes[item.type].emoji;
+            
+            const fileSize = document.createElement('div');
+            fileSize.className = 'file-size';
+            fileSize.textContent = formatFileSize(item.file.size);
+            
+            fileItem.appendChild(fileName);
+            fileItem.appendChild(fileType);
+            fileItem.appendChild(fileSize);
+            fileList.appendChild(fileItem);
+          });
+          
+          if (filteredFiles.length > 10) {
+            const moreItem = document.createElement('div');
+            moreItem.style.cssText = 'padding: 8px; text-align: center; color: #666; font-style: italic; font-size: 12px;';
+            moreItem.textContent = `... and ${filteredFiles.length - 10} more files`;
+            fileList.appendChild(moreItem);
+          }
+          
+          const totalFiles = currentFiles.length;
+          const skippedFiles = totalFiles - filteredFiles.length;
+          let countText = `${filteredFiles.length} file(s) ready for import`;
+          if (skippedFiles > 0) {
+            countText += ` (${skippedFiles} file(s) will be skipped)`;
+          }
+          fileCount.textContent = countText;
+          
+          filePreview.style.display = 'block';
+          importButton.disabled = false;
+        } else {
+          const totalFiles = currentFiles.length;
+          fileCount.textContent = `No valid files found for selected type (${totalFiles} file(s) will be skipped)`;
+          fileList.innerHTML = '<p style="color: #666; font-style: italic; text-align: center; padding: 20px;">No valid files found for the selected media type.</p>';
+          filePreview.style.display = 'block';
+          importButton.disabled = true;
+        }
+      }
+
+      directoryInput.addEventListener('change', function(e) {
+        currentFiles = Array.from(e.target.files);
+        updateFilePreview();
+      });
+
+      // Update preview when media type selection changes
+      mediaTypeInputs.forEach(input => {
+        input.addEventListener('change', updateFilePreview);
+      });
+
+      function formatFileSize(bytes) {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+      }
+
+      // Handle form submission with chunked upload (adapted for popup)
+      document.getElementById('import-media-form').addEventListener('submit', function(e) {
+        e.preventDefault();
+        
+        const files = directoryInput.files;
+        if (!files || files.length === 0) {
+          alert('Please select a folder containing media files.');
+          return;
+        }
+
+        if (uploadInProgress) {
+          alert('Upload already in progress. Please wait...');
+          return;
+        }
+
+        const filteredFiles = filterFilesBySelection();
+        if (filteredFiles.length === 0) {
+          alert('No valid media files found for the selected type.');
+          return;
+        }
+
+        startChunkedUpload(filteredFiles.map(item => item.file));
+      });
+
+      function startChunkedUpload(files) {
+        uploadInProgress = true;
+        uploadStartTime = Date.now();
+        
+        showUploadFeedback(files.length);
+        
+        const chunkSize = 10; // Process 10 files at a time
+        let uploadedCount = 0;
+        let errorCount = 0;
+        const totalFiles = files.length;
+        
+        function uploadChunk(startIndex) {
+          if (startIndex >= totalFiles) {
+            uploadComplete(uploadedCount, errorCount, totalFiles);
+            return;
+          }
+          
+          const endIndex = Math.min(startIndex + chunkSize, totalFiles);
+          const chunkFiles = files.slice(startIndex, endIndex);
+          const currentChunk = Math.floor(startIndex / chunkSize) + 1;
+          const totalChunks = Math.ceil(totalFiles / chunkSize);
+          
+          updateUploadFeedback(uploadedCount, totalFiles, `Uploading batch ${currentChunk} of ${totalChunks}...`);
+          
+          const formData = new FormData();
+          
+          // Add selected media types
+          const selectedType = document.querySelector('input[name="media_types[]"]:checked').value;
+          formData.append('media_types[]', selectedType);
+          
+          // Add files to form data with client file paths
+          chunkFiles.forEach(file => {
+            formData.append('media_files[]', file);
+            // Include client file path (webkitRelativePath for directory uploads)
+            const clientPath = file.webkitRelativePath || file.name;
+            formData.append('client_file_paths[]', clientPath);
+          });
+          
+          // Add CSRF token
+          const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+          formData.append('authenticity_token', csrfToken);
+          
+          // Mark if this is the final batch
+          const isFinalBatch = endIndex >= totalFiles;
+          formData.append('is_final_batch', isFinalBatch.toString());
+          
+          currentUploadController = new AbortController();
+          
+          fetch('/family/media/import_media', {
+            method: 'POST',
+            body: formData,
+            signal: currentUploadController.signal
+          }).then(response => {
+            if (response.ok) {
+              return response.json();
+            } else {
+              throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+          }).then(data => {
+            if (data.status === 'success') {
+              uploadedCount += chunkFiles.length;
+              updateUploadFeedback(uploadedCount, totalFiles, `Batch ${currentChunk} completed successfully`);
+              
+              if (endIndex < totalFiles) {
+                setTimeout(() => uploadChunk(endIndex), 1000);
+              } else if (endIndex >= totalFiles) {
+                uploadComplete(uploadedCount, errorCount, totalFiles);
+              }
+            } else {
+              throw new Error(data.message || 'Upload failed');
+            }
+          }).catch(error => {
+            if (error.name === 'AbortError') return;
+            
+            errorCount += chunkFiles.length;
+            console.error(`Chunk ${currentChunk} failed:`, error);
+            updateUploadFeedback(uploadedCount, totalFiles, `Batch ${currentChunk} failed: ${error.message}`);
+            
+            if (endIndex < totalFiles) {
+              setTimeout(() => uploadChunk(endIndex), 2000);
+            } else if (endIndex >= totalFiles) {
+              uploadComplete(uploadedCount, errorCount, totalFiles);
+            }
+          });
+        }
+        
+        uploadChunk(0);
+      }
+
+      function showUploadFeedback(totalFiles) {
+        const uploadFeedback = document.getElementById('upload-feedback');
+        uploadFeedback.className = 'upload-feedback progress';
+        uploadFeedback.innerHTML = `
+          <h3 style="margin: 0 0 10px 0;">📁 Media Import in Progress</h3>
+          <div class="progress-bar">
+            <div id="upload-progress-bar" class="progress-fill"></div>
+          </div>
+          <div id="upload-progress-text">Preparing upload...</div>
+          <div class="stay-on-page-warning">
+            ⚠️ <strong>Keep this window open</strong> until upload completes<br>
+            📁 Uploading ${totalFiles} files in small batches
+          </div>
+        `;
+        
+        // Disable form
+        document.getElementById('import-media-form').style.opacity = '0.3';
+        document.getElementById('import-media-form').style.pointerEvents = 'none';
+      }
+
+      function updateUploadFeedback(uploaded, total, message) {
+        const progressBar = document.getElementById('upload-progress-bar');
+        const progressText = document.getElementById('upload-progress-text');
+        
+        if (progressBar && progressText) {
+          const percentage = Math.round((uploaded / total) * 100);
+          progressBar.style.width = percentage + '%';
+          progressBar.textContent = percentage + '%';
+          progressText.textContent = `${message} (${uploaded}/${total} files - ${percentage}%)`;
+        }
+      }
+
+      function formatDuration(milliseconds) {
+        const seconds = Math.floor(milliseconds / 1000);
+        const minutes = Math.floor(seconds / 60);
+        const remainingSeconds = seconds % 60;
+        
+        if (minutes > 0) {
+          return `${minutes}m ${remainingSeconds}s`;
+        } else {
+          return `${remainingSeconds}s`;
+        }
+      }
+
+      function uploadComplete(uploaded, errors, total) {
+        uploadInProgress = false;
+        const duration = uploadStartTime ? Date.now() - uploadStartTime : 0;
+        const durationText = formatDuration(duration);
+        
+        const feedback = document.getElementById('upload-feedback');
+        if (feedback) {
+          if (errors === 0) {
+            feedback.className = 'upload-feedback success';
+            feedback.innerHTML = `
+              <h3 style="margin: 0 0 10px 0;">✅ Upload Complete!</h3>
+              <p>Successfully uploaded ${uploaded} media files in ${durationText}.</p>
+              <p><strong>Background processing started</strong> - thumbnails and EXIF data will be generated shortly.</p>
+              <div style="margin-top: 15px;">
+                <button onclick="window.close()" class="btn btn-primary">Close Window</button>
+                <button onclick="window.opener.location.reload(); window.close();" class="btn btn-secondary">Close & Refresh</button>
+              </div>
+            `;
+          } else {
+            feedback.className = 'upload-feedback error';
+            feedback.innerHTML = `
+              <h3 style="margin: 0 0 10px 0;">⚠️ Upload Completed with Errors</h3>
+              <p>Uploaded ${uploaded} files, ${errors} failed. Duration: ${durationText}.</p>
+              <div style="margin-top: 15px;">
+                <button onclick="window.close()" class="btn btn-primary">Close Window</button>
+                <button onclick="window.opener.location.reload(); window.close();" class="btn btn-secondary">Close & Refresh</button>
+              </div>
+            `;
+          }
+        }
+      }
+    });
+  </script>
+</body>
+</html>

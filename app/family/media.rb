@@ -2,7 +2,7 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
 
   # Add custom action buttons to index page
   action_item :import_media, only: :index do
-    link_to 'Import Media', import_media_family_media_path, class: 'btn btn-primary'
+    link_to 'Import Media', '#', class: 'btn btn-primary', onclick: 'openImportPopup(); return false;'
   end
 
   # Permitted parameters
@@ -11,6 +11,35 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
 
   # Index page configuration
   index do
+    # Add the JavaScript at the top of the index
+    div do
+      raw <<~JAVASCRIPT
+        <script>
+          function openImportPopup() {
+            const popup = window.open(
+              '#{import_media_popup_family_media_path}',
+              'importMedia',
+              'width=800,height=600,scrollbars=yes,resizable=yes,toolbar=no,menubar=no,location=no,status=no,directories=no'
+            );
+            
+            // Keep popup on top and focused
+            if (popup) {
+              popup.focus();
+              
+              // Optional: Keep checking if popup is still open and refresh media list when closed
+              const checkClosed = setInterval(function() {
+                if (popup.closed) {
+                  clearInterval(checkClosed);
+                  // Optionally refresh the media list
+                  window.location.reload();
+                }
+              }, 1000);
+            }
+          }
+        </script>
+      JAVASCRIPT
+    end
+
     selectable_column
     
     column "Thumbnail", sortable: false do |medium|
@@ -228,6 +257,17 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
           end
         end
       end
+    end
+  end
+
+  # Collection action for importing media in popup
+  collection_action :import_media_popup, method: [:get, :post] do
+    if request.post?
+      # Use the same logic as import_media but return JSON for popup
+      redirect_to action: :import_media and return
+    else
+      # Render popup layout
+      render layout: false
     end
   end
 
