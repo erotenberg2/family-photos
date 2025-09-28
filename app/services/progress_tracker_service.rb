@@ -11,6 +11,7 @@ class ProgressTrackerService
       status: 'uploading',
       total_files: total_files,
       uploaded_files: 0,
+      skipped_files: 0,
       failed_files: 0,
       current_file: nil,
       started_at: Time.current.iso8601,
@@ -30,6 +31,7 @@ class ProgressTrackerService
       batch_id: batch_id,
       files_count: batch_files_count,
       uploaded: 0,
+      skipped: 0,
       failed: 0,
       started_at: Time.current.iso8601,
       status: 'uploading'
@@ -49,6 +51,8 @@ class ProgressTrackerService
     # Update session totals
     if status == 'uploaded'
       session_data['uploaded_files'] += 1
+    elsif status == 'skipped'
+      session_data['skipped_files'] += 1
     elsif status == 'failed'
       session_data['failed_files'] += 1
     end
@@ -61,6 +65,8 @@ class ProgressTrackerService
     if batch
       if status == 'uploaded'
         batch['uploaded'] += 1
+      elsif status == 'skipped'
+        batch['skipped'] += 1
       elsif status == 'failed'
         batch['failed'] += 1
       end

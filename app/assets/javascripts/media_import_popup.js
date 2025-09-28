@@ -151,34 +151,31 @@ window.MediaImportPopup = {
     
     if (importButton) importButton.disabled = false;
     
-    // Group files by type
+    // Count files by type
     const filesByType = {};
     filteredFiles.forEach(file => {
       const type = this.getFileType(file);
-      if (!filesByType[type]) filesByType[type] = [];
-      filesByType[type].push(file);
+      filesByType[type] = (filesByType[type] || 0) + 1;
     });
     
-    let html = '';
-    for (const [type, files] of Object.entries(filesByType)) {
-      const config = this.mediaTypes[type];
-      const emoji = config ? config.emoji : '📄';
-      
-      html += `<div style="margin-bottom: 15px;">`;
-      html += `<h4 style="margin: 0 0 8px 0; color: #333;">${emoji} ${type.charAt(0).toUpperCase() + type.slice(1)} (${files.length})</h4>`;
-      html += `<ul style="margin: 0; padding-left: 20px; max-height: 150px; overflow-y: auto;">`;
-      
-      files.slice(0, 10).forEach(file => {
-        const sizeKB = (file.size / 1024).toFixed(1);
-        html += `<li style="margin-bottom: 4px; font-size: 13px;">${file.name} <span style="color: #666;">(${sizeKB} KB)</span></li>`;
-      });
-      
-      if (files.length > 10) {
-        html += `<li style="color: #666; font-style: italic;">... and ${files.length - 10} more files</li>`;
-      }
-      
-      html += `</ul></div>`;
+    // Create simple count summary
+    let html = '<div style="padding: 10px; background: #f8f9fa; border-radius: 5px;">';
+    
+    // Show counts for each media type
+    const typeLabels = {
+      photo: '📸 Images',
+      video: '🎬 Movies', 
+      audio: '🎵 Audio'
+    };
+    
+    for (const [type, count] of Object.entries(filesByType)) {
+      const label = typeLabels[type] || `📄 ${type.charAt(0).toUpperCase() + type.slice(1)}`;
+      html += `<div style="margin-bottom: 8px; font-size: 14px;">
+        <strong>${label}:</strong> ${count}
+      </div>`;
     }
+    
+    html += '</div>';
     
     fileList.innerHTML = html;
     filePreview.style.display = 'block';
@@ -222,8 +219,9 @@ window.MediaImportPopup = {
     const chunkSize = 10; // Upload in chunks of 10 files
     const totalFiles = files.length;
     let processedFiles = 0;
-    let importedCount = 0;
-    let errorCount = 0;
+        let importedCount = 0;
+        let skippedCount = 0;
+        let failedCount = 0;
     
     const uploadFeedback = document.getElementById('upload-feedback');
     
@@ -262,6 +260,9 @@ window.MediaImportPopup = {
         formData.append('authenticity_token', csrfToken.getAttribute('content'));
       }
       
+      // Add total files count for proper progress tracking
+      formData.append('total_files_selected', totalFiles);
+      
       // Create abort controller for this request
       this.currentUploadController = new AbortController();
       
@@ -279,26 +280,32 @@ window.MediaImportPopup = {
         
         if (data.status === 'success') {
           importedCount += data.imported_count || 0;
-          errorCount += data.error_count || 0;
+          skippedCount += data.skipped_count || 0;
+          failedCount += data.failed_count || 0;
           
           const progress = Math.round((processedFiles / totalFiles) * 100);
           
           if (uploadFeedback) {
-            uploadFeedback.innerHTML = `
-              <div style="color: #28a745; font-weight: bold;">
-                Progress: ${progress}% (${processedFiles}/${totalFiles} files processed)
-                <br>Imported: ${importedCount}, Errors: ${errorCount}
-              </div>
-            `;
+              uploadFeedback.innerHTML = `
+                <div style="color: #28a745; font-weight: bold;">
+                  Upload Progress: ${progress}% (${processedFiles}/${totalFiles} files scanned)
+                  <div class="progress-bar" style="background: #ffffff; border-radius: 10px; overflow: hidden; height: 20px; margin: 10px 0; border: 1px solid #007cba;">
+                    <div class="progress-fill" style="background: linear-gradient(90deg, #007cba, #0056a3); height: 100%; width: ${progress}%; transition: width 0.3s ease; display: flex; align-items: center; justify-content: center; color: white; font-size: 11px; font-weight: bold;">
+                      ${progress}%
+                    </div>
+                  </div>
+                  <br>Skipped: ${skippedCount}, Failed: ${failedCount}
+                </div>
+              `;
           }
           
           if (processedFiles < totalFiles) {
             // Upload next chunk
             setTimeout(() => uploadChunk(endIndex), 100);
-          } else {
-            // All chunks completed
-            this.handleUploadComplete(importedCount, errorCount, totalFiles);
-          }
+              } else {
+                // All chunks completed
+                this.handleUploadComplete(importedCount, skippedCount, failedCount, totalFiles);
+              }
         } else {
           throw new Error(data.message || 'Upload failed');
         }
@@ -310,7 +317,7 @@ window.MediaImportPopup = {
         }
         
         console.error('Upload error:', error);
-        errorCount += chunk.length;
+        failedCount += chunk.length;
         
         if (uploadFeedback) {
           uploadFeedback.innerHTML = `<div style="color: #dc3545; font-weight: bold;">Error: ${error.message}</div>`;
@@ -324,24 +331,54 @@ window.MediaImportPopup = {
     uploadChunk(0);
   },
 
-  handleUploadComplete: function(importedCount, errorCount, totalFiles) {
+  handleUploadComplete: function(importedCount, skippedCount, failedCount, totalFiles) {
     const uploadDuration = ((Date.now() - this.uploadStartTime) / 1000).toFixed(1);
     const uploadFeedback = document.getElementById('upload-feedback');
     
     if (uploadFeedback) {
-      uploadFeedback.innerHTML = `
-        <div style="color: #28a745; font-weight: bold; padding: 15px; background: #d4edda; border: 1px solid #c3e6cb; border-radius: 4px; margin: 10px 0;">
-          ✅ Upload Complete! 
-          <br>Duration: ${uploadDuration} seconds
-          <br>Imported: ${importedCount}/${totalFiles} files
-          ${errorCount > 0 ? `<br><span style="color: #856404;">Errors: ${errorCount}</span>` : ''}
-        </div>
-      `;
+                uploadFeedback.innerHTML = `
+                  <div style="color: #28a745; font-weight: bold; padding: 15px; background: #d4edda; border: 1px solid #c3e6cb; border-radius: 4px; margin: 10px 0;">
+                    ✅ Upload Complete! 
+                    <br>Duration: ${uploadDuration} seconds
+                    <br>Uploaded: ${importedCount}/${totalFiles} files
+                    ${skippedCount > 0 ? `<br><span style="color: #6c757d;">Skipped: ${skippedCount}</span>` : ''}
+                    ${failedCount > 0 ? `<br><span style="color: #dc3545;">Failed: ${failedCount} (upload errors)</span>` : ''}
+                    <br><small style="color: #666;">Note: Files are now being post-processed (EXIF extraction, thumbnails) in the background.</small>
+                  </div>
+                `;
+                
+                // Update buttons after upload completion
+                const importButton = document.getElementById('import-button');
+                const cancelButton = document.querySelector('.btn-secondary');
+                
+                console.log('Updating buttons after upload completion:', {
+                  importButton: !!importButton,
+                  cancelButton: !!cancelButton
+                });
+                
+                if (importButton) {
+                  console.log('Changing import button text from:', importButton.textContent);
+                  importButton.textContent = 'Close';
+                  importButton.disabled = false;  // Enable the button
+                  importButton.onclick = function() {
+                    console.log('Close button clicked');
+                    closeAndRefreshParent();
+                  };
+                  console.log('Import button updated to:', importButton.textContent, 'enabled:', !importButton.disabled);
+                }
+                
+                if (cancelButton) {
+                  console.log('Hiding cancel button');
+                  cancelButton.style.display = 'none';
+                }
     }
     
-    this.resetUploadState();
+    // Don't reset upload state after completion - buttons are already updated above
+    this.uploadInProgress = false;
+    this.uploadStartTime = null;
+    this.currentUploadController = null;
     
-    console.log(`Upload completed in ${uploadDuration}s: ${importedCount} imported, ${errorCount} errors`);
+    console.log(`Upload completed in ${uploadDuration}s: ${importedCount} imported, ${skippedCount} skipped, ${failedCount} failed`);
   },
 
   resetUploadState: function() {

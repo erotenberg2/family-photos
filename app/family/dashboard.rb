@@ -97,8 +97,9 @@ ActiveAdmin.register_page "Dashboard", namespace: :family do
                 // Show upload sessions
                 if (uploadSessions.length > 0) {
                   uploadSessions.forEach(session => {
+                    const processedFiles = session.uploaded_files + session.skipped_files + session.failed_files;
                     const progress = session.total_files > 0 ? 
-                      Math.round(((session.uploaded_files + session.failed_files) / session.total_files) * 100) : 0;
+                      Math.round((processedFiles / session.total_files) * 100) : 0;
                     
                     html += `
                       <div style="background: #e8f4fd; padding: 12px; border-radius: 6px; border-left: 4px solid #007cba; margin-bottom: 10px;">
@@ -107,6 +108,7 @@ ActiveAdmin.register_page "Dashboard", namespace: :family do
                         </div>
                         <div style="margin-bottom: 8px; font-size: 12px;">
                           <strong>${session.uploaded_files}</strong> uploaded, 
+                          <strong>${session.skipped_files}</strong> skipped, 
                           <strong>${session.failed_files}</strong> failed of 
                           <strong>${session.total_files}</strong> total
                         </div>

@@ -258,6 +258,9 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
         # Get or create upload log for this session
         upload_log = UploadLog.find_by(session_id: session_id, session_completed_at: nil)
         
+        # Get total files count from frontend
+        total_files_selected = params[:total_files_selected]&.to_i || all_files.length
+        
         if upload_log.nil?
           # First batch - create new upload log
           batch_id = SecureRandom.uuid
@@ -267,15 +270,15 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
             session_id: session_id,
             session_started_at: Time.current,
             user_agent: request.user_agent,
-            total_files_selected: 0, # Will be incremented with each batch
+            total_files_selected: total_files_selected, # Use total files from frontend
             files_imported: 0,
             files_skipped: 0,
             files_data: []
           )
-          Rails.logger.info "Created new UploadLog for session: #{session_id}"
+          Rails.logger.info "Created new UploadLog for session: #{session_id} with #{total_files_selected} total files"
           
-          # Start Redis progress tracking for the session
-          ProgressTrackerService.start_upload_session(session_id, current_user.id, all_files.length)
+          # Start Redis progress tracking for the session with total files count
+          ProgressTrackerService.start_upload_session(session_id, current_user.id, total_files_selected)
         else
           # Subsequent batch - use existing upload log
           batch_id = upload_log.batch_id
@@ -285,23 +288,30 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
         # Start Redis progress tracking for this batch
         ProgressTrackerService.start_upload_batch(session_id, batch_id, all_files.length)
         
-        # Update total files selected for this batch
-        upload_log.update!(
-          total_files_selected: upload_log.total_files_selected + all_files.length
-        )
+        # Update total files selected for this batch (only for first batch)
+        if upload_log.total_files_selected < total_files_selected
+          upload_log.update!(total_files_selected: total_files_selected)
+        end
         
         imported_count = 0
+        skipped_count = 0
+        failed_count = 0
         errors = []
+        skipped_files = []
+        failed_files = []
         
         # Get client file paths if provided
         client_file_paths = params[:client_file_paths] || []
         
-        # Process rejected files first
+        # Process rejected files first (unsupported file types = skipped)
         rejected_files = all_files - filtered_files.map { |f| f[:file] }
         rejected_files.each_with_index do |file, index|
           # Find the client file path for this rejected file
           rejected_file_index = all_files.index(file)
           client_file_path = client_file_paths[rejected_file_index] if rejected_file_index
+          
+          skipped_count += 1
+          skipped_files << "#{file.original_filename}: File type not supported"
           
           upload_log.add_file_data(
             filename: file.original_filename,
@@ -312,8 +322,8 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
             client_file_path: client_file_path
           )
           
-          # Update Redis progress
-          ProgressTrackerService.update_upload_progress(session_id, batch_id, file.original_filename, 'failed', 'File type not supported')
+          # Update Redis progress as skipped (not failed)
+          ProgressTrackerService.update_upload_progress(session_id, batch_id, file.original_filename, 'skipped', 'File type not supported')
         end
         
         # Process accepted files
@@ -346,24 +356,48 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
             
             # Update Redis progress
             ProgressTrackerService.update_upload_progress(session_id, batch_id, file.original_filename, 'uploaded')
-          else
-            error_msg = result[:error] || "Unknown error"
-            errors << "#{file.original_filename}: #{error_msg}"
-            Rails.logger.error "❌ Failed to import: #{file.original_filename} - #{error_msg}"
-            
-            # Add failed import to upload log
-            upload_log.add_file_data(
-              filename: file.original_filename,
-              file_size: file.size,
-              content_type: file.content_type,
-              status: 'skipped',
-              skip_reason: error_msg,
-              client_file_path: client_file_path
-            )
-            
-            # Update Redis progress
-            ProgressTrackerService.update_upload_progress(session_id, batch_id, file.original_filename, 'failed', error_msg)
-          end
+                else
+                  error_msg = result[:error] || "Unknown error"
+                  
+                  # Check if this is a duplicate file (skipped, not failed)
+                  if error_msg.include?('duplicate') || error_msg.include?('already exists')
+                    skipped_count += 1
+                    skipped_files << "#{file.original_filename}: #{error_msg}"
+                    Rails.logger.info "⏭️ Skipped duplicate: #{file.original_filename} - #{error_msg}"
+                    
+                    # Add skipped import to upload log
+                    upload_log.add_file_data(
+                      filename: file.original_filename,
+                      file_size: file.size,
+                      content_type: file.content_type,
+                      status: 'skipped',
+                      skip_reason: error_msg,
+                      client_file_path: client_file_path
+                    )
+                    
+                    # Update Redis progress as skipped
+                    ProgressTrackerService.update_upload_progress(session_id, batch_id, file.original_filename, 'skipped', error_msg)
+                  else
+                    # This is a real failure
+                    failed_count += 1
+                    failed_files << "#{file.original_filename}: #{error_msg}"
+                    errors << "#{file.original_filename}: #{error_msg}"
+                    Rails.logger.error "❌ Failed to import: #{file.original_filename} - #{error_msg}"
+                    
+                    # Add failed import to upload log
+                    upload_log.add_file_data(
+                      filename: file.original_filename,
+                      file_size: file.size,
+                      content_type: file.content_type,
+                      status: 'failed',
+                      skip_reason: error_msg,
+                      client_file_path: client_file_path
+                    )
+                    
+                    # Update Redis progress as failed
+                    ProgressTrackerService.update_upload_progress(session_id, batch_id, file.original_filename, 'failed', error_msg)
+                  end
+                end
         end
         
         # Update the upload session statistics
@@ -403,9 +437,13 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
         render json: { 
           status: 'success', 
           imported_count: imported_count,
+          skipped_count: skipped_count,
+          failed_count: failed_count,
           total_count: all_files.length,
           error_count: errors.length,
-          errors: errors
+          errors: errors,
+          skipped_files: skipped_files,
+          failed_files: failed_files
         }
       else
         Rails.logger.error "No media files found in request"

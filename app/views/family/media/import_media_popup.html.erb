@@ -195,8 +195,17 @@
     }
     
     .btn-primary:disabled {
-      background: #cccccc;
-      cursor: not-allowed;
+      background: #cccccc !important;
+      color: #666666 !important;
+      cursor: not-allowed !important;
+      opacity: 0.6;
+    }
+    
+    .btn-primary:disabled:hover {
+      background: #cccccc !important;
+      color: #666666 !important;
+      cursor: not-allowed !important;
+      opacity: 0.6;
     }
     
     .btn-secondary {
@@ -204,8 +213,22 @@
       color: white;
     }
     
-    .btn-secondary:hover {
+    .btn-secondary:hover:not(:disabled) {
       background: #545b62;
+    }
+    
+    .btn-secondary:disabled {
+      background: #cccccc !important;
+      color: #666666 !important;
+      cursor: not-allowed !important;
+      opacity: 0.6;
+    }
+    
+    .btn-secondary:disabled:hover {
+      background: #cccccc !important;
+      color: #666666 !important;
+      cursor: not-allowed !important;
+      opacity: 0.6;
     }
     
     .upload-feedback {
