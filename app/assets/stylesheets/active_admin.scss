@@ -14,4 +14,30 @@
 // Overriding any non-variable Sass must be done after the fact.
 // For example, to change the default status-tag color:
 //
-//   .status_tag { background: #6090DB; }
+// .status_tag { background: #6090DB; }
+
+// Custom status tag colors for upload logs
+.status_tag {
+  &.ok { 
+    background: #5cb85c !important;  // green
+  }
+  &.warning { 
+    background: #f0ad4e !important;  // orange
+  }
+  &.error { 
+    background: #d9534f !important;  // red
+  }
+  &.great { 
+    background: #28a745 !important;  // brighter green for skipped files
+  }
+  &.good { 
+    background: #00ff3c !important;  // brighter green for skipped files
+    color: #000000 !important;
+  }
+  &.yes { 
+    background: #6090DB !important;  // blue (ActiveAdmin default)
+  }
+  &.no { 
+    background: #cacaca !important;  // gray (ActiveAdmin default)
+  }
+}

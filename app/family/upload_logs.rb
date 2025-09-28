@@ -10,6 +10,7 @@ ActiveAdmin.register UploadLog, namespace: :family do
     
     column "Status", sortable: false do |log|
       status_tag log.status, class: log.status_color
+
     end
     
     column "Files", sortable: :total_files_selected do |log|

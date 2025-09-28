@@ -83,15 +83,15 @@ class UploadLog < ApplicationRecord
   
   def status_color
     case status
-    when 'Successful' then 'green'      # bright green - no failures, no skips
-    when 'Partial Success' then 'orange' # yellow/orange - some failures
-    when 'Failed' then 'red'            # red - all failed
-    when 'Skipped' then '#006400'       # darker green - all skipped
-    when 'Some Skipped' then '#006400'  # darker green - some skipped
-    when 'In Progress' then 'blue'      # blue - still processing
-    when 'Interrupted' then 'purple'    # purple - interrupted
-    when 'Complete' then 'green'        # green - generic completion
-    else 'gray'
+    when 'Successful' then :great        
+    when 'Partial Success' then :warning 
+    when 'Failed' then :error          
+    when 'Skipped' then :good       
+    when 'Some Skipped' then :good  
+    when 'In Progress' then :no        
+    when 'Interrupted' then :error     
+    when 'Complete' then :ok           
+    else :no
     end
   end
   
