@@ -42,13 +42,22 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
       status_tag medium.medium_type.humanize, class: "#{medium.medium_type}_type"
     end
     
-    column "Processing Status", sortable: false do |medium|
-      if medium.post_processed?
-        status_tag "Processed", class: :ok
-      else
-        status_tag "Pending", class: :warning
-      end
-    end
+        column "Processing Status", sortable: false do |medium|
+          case medium.post_processing_status
+          when 'completed'
+            if medium.post_processed?
+              status_tag "Processed", class: :ok
+            else
+              status_tag "Processing Failed", class: :error
+            end
+          when 'in_progress'
+            status_tag "Processing...", class: :warning
+          when 'not_started'
+            status_tag "Queued", class: :no
+          else
+            status_tag "Unknown", class: :error
+          end
+        end
     
     column "Title" do |medium|
       medium.mediable&.title || "Untitled"
@@ -158,6 +167,27 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
       row :md5_hash
       row :created_at
       row :updated_at
+      row :processing_started_at
+      row :processing_completed_at
+      row "Processing Duration" do |resource|
+        if resource.post_processing_duration
+          "#{(resource.post_processing_duration * 1000).round}ms"
+        else
+          "—"
+        end
+      end
+      row "Processing Status" do |resource|
+        case resource.post_processing_status
+        when 'completed'
+          status_tag "Completed", class: :ok
+        when 'in_progress'
+          status_tag "In Progress", class: :warning
+        when 'not_started'
+          status_tag "Not Started", class: :no
+        else
+          status_tag "Unknown", class: :error
+        end
+      end
     end
 
     # Show type-specific details
@@ -323,6 +353,12 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
           files_imported: upload_log.files_imported + imported_count,
           files_skipped: upload_log.files_skipped + (all_files.length - imported_count)
         )
+        
+        # Enqueue asynchronous post-processing for this batch
+        if imported_count > 0
+          Rails.logger.info "🚀 Enqueuing batch post-processing job for batch: #{batch_id}, session: #{session_id}"
+          BatchPostProcessJob.perform_later(batch_id, session_id)
+        end
         
         # Check if this might be the final batch by looking at frontend parameters
         is_final_batch = params[:is_final_batch] == 'true'

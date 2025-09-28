@@ -61,6 +61,33 @@ class Medium < ApplicationRecord
   def self.total_storage_size
     sum(:file_size)
   end
+  
+  # Scopes for post-processing status
+  scope :post_processing_not_started, -> { where(processing_started_at: nil) }
+  scope :post_processing_in_progress, -> { where.not(processing_started_at: nil).where(processing_completed_at: nil) }
+  scope :post_processing_completed, -> { where.not(processing_started_at: nil).where.not(processing_completed_at: nil) }
+  
+  # Find media that need post-processing for a specific batch
+  def self.needing_post_processing(batch_id: nil, session_id: nil)
+    scope = post_processing_not_started
+    scope = scope.where(upload_batch_id: batch_id) if batch_id
+    scope = scope.where(upload_session_id: session_id) if session_id
+    scope
+  end
+  
+  # Get post-processing statistics for a batch or session
+  def self.post_processing_stats(batch_id: nil, session_id: nil)
+    scope = all
+    scope = scope.where(upload_batch_id: batch_id) if batch_id
+    scope = scope.where(upload_session_id: session_id) if session_id
+    
+    {
+      total: scope.count,
+      not_started: scope.post_processing_not_started.count,
+      in_progress: scope.post_processing_in_progress.count,
+      completed: scope.post_processing_completed.count
+    }
+  end
 
   # Instance methods
   def file_size_human
@@ -105,6 +132,34 @@ class Medium < ApplicationRecord
       # Default fallback - assume processed if mediable exists
       mediable.present?
     end
+  end
+  
+  # Check if post-processing has been started (either completed or in progress)
+  def post_processing_started?
+    processing_started_at.present?
+  end
+  
+  # Check if post-processing is currently in progress
+  def post_processing_in_progress?
+    processing_started_at.present? && processing_completed_at.nil?
+  end
+  
+  # Check if post-processing has been completed
+  def post_processing_completed?
+    processing_started_at.present? && processing_completed_at.present?
+  end
+  
+  # Get post-processing status as a string
+  def post_processing_status
+    return 'not_started' unless processing_started_at.present?
+    return 'in_progress' if processing_completed_at.nil?
+    return 'completed'
+  end
+  
+  # Get post-processing duration in seconds
+  def post_processing_duration
+    return nil unless processing_started_at.present? && processing_completed_at.present?
+    processing_completed_at - processing_started_at
   end
 
   # Class method to create medium from uploaded file
