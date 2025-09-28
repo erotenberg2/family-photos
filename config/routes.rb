@@ -14,6 +14,15 @@ Rails.application.routes.draw do
   namespace :family do
     ActiveAdmin.routes(self)
     get 'job_status', to: 'job_status#index'
+    
+    # Progress tracking routes
+    resources :progress, only: [:index] do
+      collection do
+        get 'session/:session_id', to: 'progress#show_session'
+        get 'batch/:batch_id', to: 'progress#batch'
+        post 'cleanup', to: 'progress#cleanup'
+      end
+    end
   end
   
   # Image serving routes

@@ -1,5 +1,6 @@
 ActiveAdmin.register Photo, namespace: :family do
 
+
   # Add custom action button to index page  
   action_item :import_photos, only: :index do
     link_to 'Import Photos', '#', class: 'btn btn-primary', onclick: 'openImportPopup(); return false;'
@@ -13,50 +14,9 @@ ActiveAdmin.register Photo, namespace: :family do
 
   # Index page configuration
   index do
-    # Add the JavaScript at the top of the index
-    div do
-      raw <<~JAVASCRIPT
-        <script>
-          function openImportPopup() {
-            const popup = window.open(
-              '#{import_media_popup_family_media_path}',
-              'importMedia',
-              'width=800,height=600,scrollbars=yes,resizable=yes,toolbar=no,menubar=no,location=no,status=no,directories=no,alwaysOnTop=yes'
-            );
-            
-            // Keep popup on top and focused
-            if (popup) {
-              popup.focus();
-              
-              // Try to keep window floating on top (browser security may limit this)
-              const keepOnTop = setInterval(function() {
-                if (popup.closed) {
-                  clearInterval(keepOnTop);
-                  clearInterval(checkClosed);
-                  // Optionally refresh the media list
-                  window.location.reload();
-                  return;
-                }
-                try {
-                  popup.focus();
-                } catch(e) {
-                  // Ignore focus errors
-                }
-              }, 2000);
-              
-              // Check if popup is closed
-              const checkClosed = setInterval(function() {
-                if (popup.closed) {
-                  clearInterval(checkClosed);
-                  clearInterval(keepOnTop);
-                  // Optionally refresh the media list
-                  window.location.reload();
-                }
-              }, 1000);
-            }
-          }
-        </script>
-      JAVASCRIPT
+    # Include the family import JavaScript
+    content_for :head do
+      javascript_include_tag 'family_import'
     end
 
     selectable_column

@@ -18,10 +18,13 @@ class BatchPostProcessJob < ApplicationJob
     
     Rails.logger.info "📋 Found #{media_to_process.count} media files to post-process in batch: #{batch_id}"
     
+    # Start Redis progress tracking for post-processing
+    ProgressTrackerService.start_post_processing_batch(batch_id, session_id, media_to_process.count)
+    
     # Enqueue individual post-processing jobs for each medium
     media_to_process.each do |medium|
       Rails.logger.info "🚀 Enqueuing post-processing job for Medium ##{medium.id}: #{medium.original_filename}"
-      MediumPostProcessJob.perform_later(medium.id)
+      MediumPostProcessJob.perform_later(medium.id, batch_id)
     end
     
     Rails.logger.info "✅ Enqueued #{media_to_process.count} post-processing jobs for batch: #{batch_id}"

@@ -2,7 +2,10 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
 
   # Add custom action buttons to index page
   action_item :import_media, only: :index do
-    link_to 'Import Media', '#', class: 'btn btn-primary', onclick: 'openImportPopup(); return false;'
+    link_to 'Import Media', '#', 
+            class: 'btn btn-primary', 
+            onclick: 'openImportPopup(); return false;',
+            'data-import-popup-url': import_media_popup_family_media_path
   end
 
   # Permitted parameters
@@ -11,52 +14,6 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
 
   # Index page configuration
   index do
-    # Add the JavaScript at the top of the index
-    div do
-      raw <<~JAVASCRIPT
-        <script>
-          function openImportPopup() {
-            const popup = window.open(
-              '#{import_media_popup_family_media_path}',
-              'importMedia',
-              'width=800,height=600,scrollbars=yes,resizable=yes,toolbar=no,menubar=no,location=no,status=no,directories=no,alwaysOnTop=yes'
-            );
-            
-            // Keep popup on top and focused
-            if (popup) {
-              popup.focus();
-              
-              // Try to keep window floating on top (browser security may limit this)
-              const keepOnTop = setInterval(function() {
-                if (popup.closed) {
-                  clearInterval(keepOnTop);
-                  clearInterval(checkClosed);
-                  // Optionally refresh the media list
-                  window.location.reload();
-                  return;
-                }
-                try {
-                  popup.focus();
-                } catch(e) {
-                  // Ignore focus errors
-                }
-              }, 2000);
-              
-              // Check if popup is closed
-              const checkClosed = setInterval(function() {
-                if (popup.closed) {
-                  clearInterval(checkClosed);
-                  clearInterval(keepOnTop);
-                  // Optionally refresh the media list
-                  window.location.reload();
-                }
-              }, 1000);
-            }
-          }
-        </script>
-      JAVASCRIPT
-    end
-
     selectable_column
     
     column "Thumbnail", sortable: false do |medium|
@@ -316,11 +273,17 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
             files_data: []
           )
           Rails.logger.info "Created new UploadLog for session: #{session_id}"
+          
+          # Start Redis progress tracking for the session
+          ProgressTrackerService.start_upload_session(session_id, current_user.id, all_files.length)
         else
           # Subsequent batch - use existing upload log
           batch_id = upload_log.batch_id
           Rails.logger.info "Using existing UploadLog for session: #{session_id}"
         end
+        
+        # Start Redis progress tracking for this batch
+        ProgressTrackerService.start_upload_batch(session_id, batch_id, all_files.length)
         
         # Update total files selected for this batch
         upload_log.update!(
@@ -348,6 +311,9 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
             skip_reason: 'File type not supported for import',
             client_file_path: client_file_path
           )
+          
+          # Update Redis progress
+          ProgressTrackerService.update_upload_progress(session_id, batch_id, file.original_filename, 'failed', 'File type not supported')
         end
         
         # Process accepted files
@@ -377,6 +343,9 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
               client_file_path: client_file_path,
               medium: result[:medium]
             )
+            
+            # Update Redis progress
+            ProgressTrackerService.update_upload_progress(session_id, batch_id, file.original_filename, 'uploaded')
           else
             error_msg = result[:error] || "Unknown error"
             errors << "#{file.original_filename}: #{error_msg}"
@@ -391,6 +360,9 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
               skip_reason: error_msg,
               client_file_path: client_file_path
             )
+            
+            # Update Redis progress
+            ProgressTrackerService.update_upload_progress(session_id, batch_id, file.original_filename, 'failed', error_msg)
           end
         end
         
@@ -399,6 +371,9 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
           files_imported: upload_log.files_imported + imported_count,
           files_skipped: upload_log.files_skipped + (all_files.length - imported_count)
         )
+        
+        # Complete batch progress tracking
+        ProgressTrackerService.complete_upload_batch(session_id, batch_id)
         
         # Enqueue asynchronous post-processing for this batch
         if imported_count > 0
@@ -416,6 +391,9 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
             completion_status: 'complete'
           )
           Rails.logger.info "Completed UploadLog session: #{session_id}"
+          
+          # Complete session progress tracking
+          ProgressTrackerService.complete_upload_session(session_id)
         end
         
         Rails.logger.info "=== IMPORT SUMMARY ==="

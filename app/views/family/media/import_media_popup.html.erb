@@ -618,6 +618,23 @@
         }
       }
 
+      function closePopupWindow() {
+        // Simple close without triggering parent refresh
+        window.close();
+      }
+
+      function closeAndRefreshParent() {
+        // Refresh parent and close popup
+        try {
+          if (window.opener && !window.opener.closed) {
+            window.opener.location.reload();
+          }
+        } catch (e) {
+          console.log('Could not refresh parent window:', e);
+        }
+        window.close();
+      }
+
       function uploadComplete(uploaded, errors, total) {
         uploadInProgress = false;
         const duration = uploadStartTime ? Date.now() - uploadStartTime : 0;
@@ -632,8 +649,8 @@
               <p>Successfully uploaded ${uploaded} media files in ${durationText}.</p>
               <p><strong>Background processing started</strong> - thumbnails and EXIF data will be generated shortly.</p>
               <div style="margin-top: 15px;">
-                <button onclick="window.close()" class="btn btn-primary">Close Window</button>
-                <button onclick="window.opener.location.reload(); window.close();" class="btn btn-secondary">Close & Refresh</button>
+                <button onclick="closePopupWindow()" class="btn btn-primary">Close Window</button>
+                <button onclick="closeAndRefreshParent()" class="btn btn-secondary">Close & Refresh</button>
               </div>
             `;
           } else {
@@ -642,8 +659,8 @@
               <h3 style="margin: 0 0 10px 0;">⚠️ Upload Completed with Errors</h3>
               <p>Uploaded ${uploaded} files, ${errors} failed. Duration: ${durationText}.</p>
               <div style="margin-top: 15px;">
-                <button onclick="window.close()" class="btn btn-primary">Close Window</button>
-                <button onclick="window.opener.location.reload(); window.close();" class="btn btn-secondary">Close & Refresh</button>
+                <button onclick="closePopupWindow()" class="btn btn-primary">Close Window</button>
+                <button onclick="closeAndRefreshParent()" class="btn btn-secondary">Close & Refresh</button>
               </div>
             `;
           }

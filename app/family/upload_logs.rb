@@ -16,7 +16,7 @@ ActiveAdmin.register UploadLog, namespace: :family do
       "#{log.files_imported}/#{log.total_files_selected}"
     end
     
-    column "Success Rate", sortable: false do |log|
+    column "Success RateX", sortable: false do |log|
       "#{log.success_rate}%"
     end
     

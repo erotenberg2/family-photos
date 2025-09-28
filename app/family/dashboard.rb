@@ -3,58 +3,17 @@ ActiveAdmin.register_page "Dashboard", namespace: :family do
 
   content title: proc { I18n.t("active_admin.dashboard") } do
     
-    # Add JavaScript for popup functionality
-    div do
-      raw <<~JAVASCRIPT
-        <script>
-          function openImportPopup() {
-            const popup = window.open(
-              '#{import_media_popup_family_media_path}',
-              'importMedia',
-              'width=800,height=600,scrollbars=yes,resizable=yes,toolbar=no,menubar=no,location=no,status=no,directories=no,alwaysOnTop=yes'
-            );
-            
-            // Keep popup on top and focused
-            if (popup) {
-              popup.focus();
-              
-              // Try to keep window floating on top (browser security may limit this)
-              const keepOnTop = setInterval(function() {
-                if (popup.closed) {
-                  clearInterval(keepOnTop);
-                  clearInterval(checkClosed);
-                  // Optionally refresh the media list
-                  window.location.reload();
-                  return;
-                }
-                try {
-                  popup.focus();
-                } catch(e) {
-                  // Ignore focus errors
-                }
-              }, 2000);
-              
-              // Check if popup is closed
-              const checkClosed = setInterval(function() {
-                if (popup.closed) {
-                  clearInterval(checkClosed);
-                  clearInterval(keepOnTop);
-                  // Optionally refresh the media list
-                  window.location.reload();
-                }
-              }, 1000);
-            }
-          }
-        </script>
-      JAVASCRIPT
+    # Include the family import JavaScript
+    content_for :head do
+      javascript_include_tag 'family_import'
     end
     
     columns do
       column do
-        panel "Media Import Status" do
-          div id: "job-monitor", style: "min-height: 120px;" do
-            div id: "job-status", style: "text-align: center; padding: 20px; color: #666;" do
-              "Loading job status..."
+        panel "Real-Time Activity Monitor" do
+          div id: "progress-monitor", style: "min-height: 200px;" do
+            div id: "progress-status", style: "text-align: center; padding: 20px; color: #666;" do
+              "Loading activity status..."
             end
           end
         end
@@ -122,68 +81,108 @@ ActiveAdmin.register_page "Dashboard", namespace: :family do
 
     script do
       raw %{
-        function updateJobStatus() {
-          fetch('/family/job_status')
+        function updateProgressStatus() {
+          fetch('/family/progress')
             .then(response => response.json())
             .then(data => {
-              const statusDiv = document.getElementById('job-status');
+              const statusDiv = document.getElementById('progress-status');
               
-              if (data.processing_jobs > 0 || data.queued_jobs > 0) {
-                const total = data.processing_jobs + data.queued_jobs;
-                statusDiv.innerHTML = `
-                  <div style="background: #e8f4fd; padding: 15px; border-radius: 6px; border-left: 4px solid #007cba;">
-                    <div style="font-size: 16px; font-weight: bold; color: #007cba; margin-bottom: 8px;">
-                      📁 Media Import in Progress
+              if (data.status === 'success') {
+                const uploadSessions = data.data.upload_sessions || [];
+                const postProcessingBatches = data.data.post_processing_batches || [];
+                
+                let html = '';
+                
+                // Show upload sessions
+                if (uploadSessions.length > 0) {
+                  uploadSessions.forEach(session => {
+                    const progress = session.total_files > 0 ? 
+                      Math.round(((session.uploaded_files + session.failed_files) / session.total_files) * 100) : 0;
+                    
+                    html += `
+                      <div style="background: #e8f4fd; padding: 12px; border-radius: 6px; border-left: 4px solid #007cba; margin-bottom: 10px;">
+                        <div style="font-size: 14px; font-weight: bold; color: #007cba; margin-bottom: 6px;">
+                          📤 Upload Session ${session.status === 'completed' ? '(Completed)' : '(Active)'}
+                        </div>
+                        <div style="margin-bottom: 8px; font-size: 12px;">
+                          <strong>${session.uploaded_files}</strong> uploaded, 
+                          <strong>${session.failed_files}</strong> failed of 
+                          <strong>${session.total_files}</strong> total
+                        </div>
+                        <div style="background: #ddd; height: 6px; border-radius: 3px; overflow: hidden;">
+                          <div style="background: #28a745; height: 100%; width: ${progress}%; transition: width 0.3s ease;"></div>
+                        </div>
+                        ${session.current_file ? `<div style="font-size: 11px; color: #666; margin-top: 4px;">Current: ${session.current_file}</div>` : ''}
+                      </div>
+                    `;
+                  });
+                }
+                
+                // Show post-processing batches
+                if (postProcessingBatches.length > 0) {
+                  postProcessingBatches.forEach(batch => {
+                    const progress = batch.total_media > 0 ? 
+                      Math.round(((batch.processed_media + batch.failed_media) / batch.total_media) * 100) : 0;
+                    
+                    html += `
+                      <div style="background: #fff3cd; padding: 12px; border-radius: 6px; border-left: 4px solid #ffc107; margin-bottom: 10px;">
+                        <div style="font-size: 14px; font-weight: bold; color: #856404; margin-bottom: 6px;">
+                          ⚙️ Post-Processing ${batch.status === 'completed' ? '(Completed)' : '(Active)'}
+                        </div>
+                        <div style="margin-bottom: 8px; font-size: 12px;">
+                          <strong>${batch.processed_media}</strong> processed, 
+                          <strong>${batch.failed_media}</strong> failed of 
+                          <strong>${batch.total_media}</strong> total
+                        </div>
+                        <div style="background: #ddd; height: 6px; border-radius: 3px; overflow: hidden;">
+                          <div style="background: #ffc107; height: 100%; width: ${progress}%; transition: width 0.3s ease;"></div>
+                        </div>
+                        ${batch.current_medium ? `<div style="font-size: 11px; color: #666; margin-top: 4px;">Current: ${batch.current_medium}</div>` : ''}
+                      </div>
+                    `;
+                  });
+                }
+                
+                if (html === '') {
+                  html = `
+                    <div style="text-align: center; padding: 20px; color: #28a745;">
+                      <div style="font-size: 18px; margin-bottom: 8px;">✅</div>
+                      <div style="font-weight: bold;">No Active Operations</div>
+                      <div style="font-size: 12px; color: #666; margin-top: 5px;">
+                        Ready to import media files
+                      </div>
                     </div>
-                    <div style="margin-bottom: 10px;">
-                      <strong>${data.processing_jobs}</strong> job(s) processing, 
-                      <strong>${data.queued_jobs}</strong> job(s) waiting
-                    </div>
-                    <div style="background: #007cba; height: 8px; border-radius: 4px; position: relative; overflow: hidden;">
-                      <div style="background: #28a745; height: 100%; width: ${data.processing_jobs > 0 ? 50 : 0}%; transition: width 0.3s ease;"></div>
-                    </div>
-                    <div style="font-size: 12px; color: #666; margin-top: 5px;">
-                      Processing since ${data.oldest_job_time || 'unknown'}
-                    </div>
-                  </div>
-                `;
-              } else if (data.completed_jobs > 0) {
-                statusDiv.innerHTML = `
-                  <div style="background: #d4edda; padding: 15px; border-radius: 6px; border-left: 4px solid #28a745;">
-                    <div style="font-size: 16px; font-weight: bold; color: #28a745; margin-bottom: 8px;">
-                      ✅ All Media Imported
-                    </div>
-                    <div style="color: #155724;">
-                      <strong>${data.completed_jobs}</strong> job(s) completed recently
-                    </div>
-                  </div>
-                `;
+                  `;
+                }
+                
+                statusDiv.innerHTML = html;
               } else {
                 statusDiv.innerHTML = `
-                  <div style="background: #f8f9fa; padding: 15px; border-radius: 6px; border: 1px solid #dee2e6;">
-                    <div style="font-size: 16px; color: #6c757d; margin-bottom: 8px;">
-                      💤 No Active Jobs
-                    </div>
-                    <div style="color: #6c757d; font-size: 14px;">
-                      Ready to import media
+                  <div style="text-align: center; padding: 20px; color: #dc3545;">
+                    <div style="font-weight: bold;">Error loading progress</div>
+                    <div style="font-size: 12px; color: #666; margin-top: 5px;">
+                      ${data.message || 'Unknown error'}
                     </div>
                   </div>
                 `;
               }
             })
             .catch(error => {
-              console.error('Error fetching job status:', error);
-              document.getElementById('job-status').innerHTML = `
-                <div style="color: #dc3545; text-align: center;">
-                  ⚠️ Unable to load job status
+              const statusDiv = document.getElementById('progress-status');
+              statusDiv.innerHTML = `
+                <div style="text-align: center; padding: 20px; color: #dc3545;">
+                  <div style="font-weight: bold;">Connection Error</div>
+                  <div style="font-size: 12px; color: #666; margin-top: 5px;">
+                    Unable to fetch progress data
+                  </div>
                 </div>
               `;
             });
         }
         
-        // Update immediately and then every second
-        updateJobStatus();
-        setInterval(updateJobStatus, 1000);
+        // Update immediately and then every 2 seconds
+        updateProgressStatus();
+        setInterval(updateProgressStatus, 2000);
       }
     end
 
