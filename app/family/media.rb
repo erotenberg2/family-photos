@@ -280,18 +280,7 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
   # Collection action for importing media in popup
   collection_action :import_media_popup, method: [:get, :post] do
     if request.post?
-      # Use the same logic as import_media but return JSON for popup
-      redirect_to action: :import_media and return
-    else
-      # Render popup layout
-      render layout: false
-    end
-  end
-
-  # Collection action for importing media
-  collection_action :import_media, method: [:get, :post] do
-    if request.post?
-      # Handle the media import
+      # Handle the media import (same logic as old import_media)
       allowed_types = params[:media_types] || ['all']
       
       if params[:media_files].present?
@@ -435,8 +424,8 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
         
         render json: { 
           status: 'success', 
-          message: "Imported #{imported_count} media file(s)#{errors.any? ? " (#{errors.length} failed)" : ""}",
           imported_count: imported_count,
+          total_count: all_files.length,
           error_count: errors.length,
           errors: errors
         }
@@ -448,8 +437,8 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
         }, status: 400
       end
     else
-      # Show the import form
-      render 'import_media'
+      # Render popup layout
+      render layout: false
     end
   end
 

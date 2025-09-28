@@ -274,7 +274,7 @@
     <h3>Select Media Files to Import</h3>
     <p>Choose a folder containing media files. Files will be filtered based on your type selection below.</p>
     
-    <%= form_with url: import_media_family_media_path, method: :post, multipart: true, local: false, html: { id: 'import-media-form' } do |f| %>
+    <%= form_with url: import_media_popup_family_media_path, method: :post, multipart: true, local: false, html: { id: 'import-media-form' } do |f| %>
       
       <div class="form-group">
         <label>Media Types to Import:</label>
@@ -533,7 +533,7 @@
           
           currentUploadController = new AbortController();
           
-          fetch('/family/media/import_media', {
+          fetch('/family/media/import_media_popup', {
             method: 'POST',
             body: formData,
             signal: currentUploadController.signal
