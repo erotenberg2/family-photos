@@ -254,27 +254,39 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
         imported_count = 0
         errors = []
         
+        # Get client file paths if provided
+        client_file_paths = params[:client_file_paths] || []
+        
         # Process rejected files first
         rejected_files = all_files - filtered_files.map { |f| f[:file] }
-        rejected_files.each do |file|
+        rejected_files.each_with_index do |file, index|
+          # Find the client file path for this rejected file
+          rejected_file_index = all_files.index(file)
+          client_file_path = client_file_paths[rejected_file_index] if rejected_file_index
+          
           upload_log.add_file_data(
             filename: file.original_filename,
             file_size: file.size,
             content_type: file.content_type,
             status: 'skipped',
-            skip_reason: 'File type not supported for import'
+            skip_reason: 'File type not supported for import',
+            client_file_path: client_file_path
           )
         end
         
         # Process accepted files
-        filtered_files.each do |file_info|
+        
+        filtered_files.each_with_index do |file_info, index|
           file = file_info[:file]
           medium_type = file_info[:medium_type]
+          # Find the client file path for this filtered file
+          filtered_file_index = all_files.index(file)
+          client_file_path = client_file_paths[filtered_file_index] if filtered_file_index
           
-          Rails.logger.info "Processing #{medium_type}: #{file.original_filename}"
+          Rails.logger.info "Processing #{medium_type}: #{file.original_filename} (client path: #{client_file_path})"
           
-          # Enable post-processing for full EXIF and thumbnail generation
-          result = Medium.create_from_uploaded_file(file, current_user, medium_type, post_process: true, batch_id: batch_id, session_id: session_id)
+          # Disable post-processing to time upload phase separately
+          result = Medium.create_from_uploaded_file(file, current_user, medium_type, post_process: false, batch_id: batch_id, session_id: session_id, client_file_path: client_file_path)
           
           if result[:success]
             imported_count += 1
@@ -286,6 +298,7 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
               file_size: file.size,
               content_type: file.content_type,
               status: 'imported',
+              client_file_path: client_file_path,
               medium: result[:medium]
             )
           else
@@ -299,7 +312,8 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
               file_size: file.size,
               content_type: file.content_type,
               status: 'skipped',
-              skip_reason: error_msg
+              skip_reason: error_msg,
+              client_file_path: client_file_path
             )
           end
         end
@@ -315,7 +329,10 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
         
         if is_final_batch
           # Mark session as completed
-          upload_log.update!(session_completed_at: Time.current)
+          upload_log.update!(
+            session_completed_at: Time.current,
+            completion_status: 'complete'
+          )
           Rails.logger.info "Completed UploadLog session: #{session_id}"
         end
         

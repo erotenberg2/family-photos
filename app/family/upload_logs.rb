@@ -40,6 +40,7 @@ ActiveAdmin.register UploadLog, namespace: :family do
   end
 
   # Filters
+  filter :completion_status, as: :select, collection: [['Incomplete', 'incomplete'], ['Complete', 'complete'], ['Interrupted', 'interrupted']]
   filter :created_at
   filter :total_files_selected
   filter :files_imported
@@ -51,6 +52,9 @@ ActiveAdmin.register UploadLog, namespace: :family do
   scope :in_progress
   scope :successful
   scope :with_errors
+  scope :interrupted
+  scope :complete_status
+  scope :incomplete_status
 
   # Show page configuration
   show do
@@ -131,6 +135,7 @@ ActiveAdmin.register UploadLog, namespace: :family do
           thead do
             tr do
               th "Filename"
+              th "Client Path"
               th "Size"
               th "Type"
               th "View"
@@ -140,6 +145,13 @@ ActiveAdmin.register UploadLog, namespace: :family do
             resource.imported_files.each do |file_data|
               tr do
                 td file_data['filename']
+                td do
+                  if file_data['client_file_path'].present?
+                    content_tag :code, file_data['client_file_path'], style: "font-size: 11px; background: #f8f9fa; padding: 2px 4px; border-radius: 3px;"
+                  else
+                    "—"
+                  end
+                end
                 td number_to_human_size(file_data['file_size']), class: 'file-size'
                 td file_data['content_type']
                 td do
@@ -164,6 +176,7 @@ ActiveAdmin.register UploadLog, namespace: :family do
           thead do
             tr do
               th "Filename"
+              th "Client Path"
               th "Size"
               th "Type"
               th "Skip Reason"
@@ -173,6 +186,13 @@ ActiveAdmin.register UploadLog, namespace: :family do
             resource.skipped_files.each do |file_data|
               tr do
                 td file_data['filename']
+                td do
+                  if file_data['client_file_path'].present?
+                    content_tag :code, file_data['client_file_path'], style: "font-size: 11px; background: #f8f9fa; padding: 2px 4px; border-radius: 3px;"
+                  else
+                    "—"
+                  end
+                end
                 td number_to_human_size(file_data['file_size']), class: 'file-size'
                 td file_data['content_type']
                 td file_data['skip_reason'] || "Unknown"

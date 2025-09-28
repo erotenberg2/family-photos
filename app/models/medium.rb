@@ -36,7 +36,7 @@ class Medium < ApplicationRecord
   }
 
   def self.ransackable_attributes(auth_object = nil)
-    ["content_type", "created_at", "file_path", "file_size", "height", "id", 
+    ["client_file_path", "content_type", "created_at", "file_path", "file_size", "height", "id", 
      "md5_hash", "medium_type", "original_filename", "taken_at", "updated_at", 
      "uploaded_by_id", "user_id", "width"]
   end
@@ -108,7 +108,8 @@ class Medium < ApplicationRecord
   end
 
   # Class method to create medium from uploaded file
-  def self.create_from_uploaded_file(uploaded_file, user, medium_type = nil, post_process: true, batch_id: nil, session_id: nil)
+  def self.create_from_uploaded_file(uploaded_file, user, medium_type = nil, 
+              post_process: false, batch_id: nil, session_id: nil, client_file_path: nil)
     upload_started_at = Time.current
     
     # Determine medium type if not specified
@@ -166,6 +167,7 @@ class Medium < ApplicationRecord
       mediable: mediable,
       uploaded_by: user,
       user: user,
+      client_file_path: client_file_path,
       upload_started_at: upload_started_at,
       upload_completed_at: upload_completed_at,
       upload_batch_id: batch_id,

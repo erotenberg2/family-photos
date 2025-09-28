@@ -4,6 +4,7 @@ class UploadLog < ApplicationRecord
   # Validations
   validates :batch_id, presence: true, uniqueness: true
   validates :session_id, presence: true
+  validates :completion_status, presence: true, inclusion: { in: %w[incomplete complete interrupted] }
   validates :total_files_selected, presence: true, numericality: { greater_than_or_equal_to: 0 }
   validates :files_imported, presence: true, numericality: { greater_than_or_equal_to: 0 }
   validates :files_skipped, presence: true, numericality: { greater_than_or_equal_to: 0 }
@@ -17,10 +18,13 @@ class UploadLog < ApplicationRecord
   scope :successful, -> { where('files_imported > 0') }
   scope :with_errors, -> { where('files_skipped > 0') }
   scope :stale, -> { where(session_completed_at: nil).where('session_started_at < ?', 1.hour.ago) }
+  scope :interrupted, -> { where(completion_status: 'interrupted') }
+  scope :complete_status, -> { where(completion_status: 'complete') }
+  scope :incomplete_status, -> { where(completion_status: 'incomplete') }
   
   # Ransackable attributes for ActiveAdmin filtering
   def self.ransackable_attributes(auth_object = nil)
-    ["batch_id", "created_at", "files_imported", "files_skipped", "session_completed_at", 
+    ["batch_id", "completion_status", "created_at", "files_imported", "files_skipped", "session_completed_at", 
      "session_id", "session_started_at", "total_files_selected", "updated_at", 
      "user_agent", "user_id"]
   end
@@ -49,11 +53,19 @@ class UploadLog < ApplicationRecord
   end
   
   def status
-    return 'In Progress' unless session_completed_at
-    return 'Success' if files_skipped == 0 && files_imported > 0
-    return 'Partial Success' if files_imported > 0 && files_skipped > 0
-    return 'All Failed' if files_imported == 0 && files_skipped > 0
-    'Unknown'
+    case completion_status
+    when 'interrupted'
+      return 'Interrupted'
+    when 'incomplete'
+      return 'In Progress'
+    when 'complete'
+      return 'Success' if files_skipped == 0 && files_imported > 0
+      return 'Partial Success' if files_imported > 0 && files_skipped > 0
+      return 'All Failed' if files_imported == 0 && files_skipped > 0
+      return 'Complete'
+    else
+      'Unknown'
+    end
   end
   
   def status_color
@@ -62,6 +74,8 @@ class UploadLog < ApplicationRecord
     when 'Partial Success' then 'orange'
     when 'All Failed' then 'red'
     when 'In Progress' then 'blue'
+    when 'Interrupted' then 'purple'
+    when 'Complete' then 'green'
     else 'gray'
     end
   end
@@ -94,13 +108,14 @@ class UploadLog < ApplicationRecord
   end
   
   # Add a file to the files_data array
-  def add_file_data(filename:, file_size:, content_type:, status:, skip_reason: nil, medium: nil)
+  def add_file_data(filename:, file_size:, content_type:, status:, skip_reason: nil, medium: nil, client_file_path: nil)
     file_data = {
       filename: filename,
       file_size: file_size,
       content_type: content_type,
       status: status,
-      skip_reason: skip_reason
+      skip_reason: skip_reason,
+      client_file_path: client_file_path
     }
     
     # Add medium/mediable info if successfully imported
@@ -133,6 +148,7 @@ class UploadLog < ApplicationRecord
       Rails.logger.info "Auto-completing stale upload session: #{session.session_id} for user: #{session.user.email}"
       session.update!(
         session_completed_at: Time.current,
+        completion_status: 'interrupted'
         # Note: files_imported and files_skipped should already be accurate from batch updates
       )
     end

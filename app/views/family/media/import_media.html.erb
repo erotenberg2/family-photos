@@ -346,9 +346,12 @@ document.addEventListener('DOMContentLoaded', function() {
       const selectedType = document.querySelector('input[name="media_types[]"]:checked').value;
       formData.append('media_types[]', selectedType);
       
-      // Add files to form data
+      // Add files to form data with client file paths
       chunkFiles.forEach(file => {
         formData.append('media_files[]', file);
+        // Include client file path (webkitRelativePath for directory uploads)
+        const clientPath = file.webkitRelativePath || file.name;
+        formData.append('client_file_paths[]', clientPath);
       });
       
       // Add CSRF token

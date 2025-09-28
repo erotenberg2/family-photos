@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_09_27_231638) do
+ActiveRecord::Schema[8.0].define(version: 2025_09_27_234851) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -118,6 +118,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_09_27_231638) do
     t.datetime "processing_completed_at"
     t.string "upload_session_id"
     t.string "upload_batch_id"
+    t.text "client_file_path"
     t.index ["created_at"], name: "index_media_on_created_at"
     t.index ["file_path"], name: "index_media_on_file_path", unique: true
     t.index ["md5_hash"], name: "index_media_on_md5_hash", unique: true
@@ -171,7 +172,9 @@ ActiveRecord::Schema[8.0].define(version: 2025_09_27_231638) do
     t.jsonb "files_data", default: []
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "completion_status", default: "incomplete", null: false
     t.index ["batch_id"], name: "index_upload_logs_on_batch_id", unique: true
+    t.index ["completion_status"], name: "index_upload_logs_on_completion_status"
     t.index ["files_data"], name: "index_upload_logs_on_files_data", using: :gin
     t.index ["user_id"], name: "index_upload_logs_on_user_id"
   end
