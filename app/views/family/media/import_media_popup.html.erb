@@ -20,29 +20,17 @@
       color: white;
       padding: 15px 20px;
       margin: -20px -20px 20px -20px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
+      text-align: center;
+      user-select: none;
+      -webkit-user-select: none;
+      -moz-user-select: none;
+      -ms-user-select: none;
     }
     
     .popup-header h1 {
       margin: 0;
       font-size: 18px;
       font-weight: 600;
-    }
-    
-    .close-btn {
-      background: rgba(255,255,255,0.2);
-      border: none;
-      color: white;
-      padding: 5px 10px;
-      border-radius: 3px;
-      cursor: pointer;
-      font-size: 12px;
-    }
-    
-    .close-btn:hover {
-      background: rgba(255,255,255,0.3);
     }
     
     .compact-panel {
@@ -280,7 +268,6 @@
 <body>
   <div class="popup-header">
     <h1>📁 Import Media</h1>
-    <button class="close-btn" onclick="window.close()">✕ Close</button>
   </div>
 
   <div class="compact-panel">

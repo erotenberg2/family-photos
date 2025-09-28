@@ -19,17 +19,34 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
             const popup = window.open(
               '#{import_media_popup_family_media_path}',
               'importMedia',
-              'width=800,height=600,scrollbars=yes,resizable=yes,toolbar=no,menubar=no,location=no,status=no,directories=no'
+              'width=800,height=600,scrollbars=yes,resizable=yes,toolbar=no,menubar=no,location=no,status=no,directories=no,alwaysOnTop=yes'
             );
             
             // Keep popup on top and focused
             if (popup) {
               popup.focus();
               
-              // Optional: Keep checking if popup is still open and refresh media list when closed
+              // Try to keep window floating on top (browser security may limit this)
+              const keepOnTop = setInterval(function() {
+                if (popup.closed) {
+                  clearInterval(keepOnTop);
+                  clearInterval(checkClosed);
+                  // Optionally refresh the media list
+                  window.location.reload();
+                  return;
+                }
+                try {
+                  popup.focus();
+                } catch(e) {
+                  // Ignore focus errors
+                }
+              }, 2000);
+              
+              // Check if popup is closed
               const checkClosed = setInterval(function() {
                 if (popup.closed) {
                   clearInterval(checkClosed);
+                  clearInterval(keepOnTop);
                   // Optionally refresh the media list
                   window.location.reload();
                 }
