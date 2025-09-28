@@ -3,7 +3,10 @@ ActiveAdmin.register Photo, namespace: :family do
 
   # Add custom action button to index page  
   action_item :import_photos, only: :index do
-    link_to 'Import Photos', '#', class: 'btn btn-primary', onclick: 'openImportPopup(); return false;'
+    link_to 'Import Photos', '#', 
+            class: 'btn btn-primary', 
+            onclick: 'openImportPopup(); return false;',
+            'data-import-popup-url': import_media_popup_family_media_path
   end
 
   # Permitted parameters

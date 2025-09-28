@@ -66,7 +66,8 @@ ActiveAdmin.register_page "Dashboard", namespace: :family do
             link_to "Import Media", '#', 
                     class: "btn btn-primary", 
                     style: "display: inline-block; margin: 10px; padding: 10px 20px; background: #007cba; color: white; text-decoration: none; border-radius: 4px;",
-                    onclick: "openImportPopup(); return false;"
+                    onclick: "openImportPopup(); return false;",
+                    'data-import-popup-url': import_media_popup_family_media_path
             br
             link_to "View All Media", family_media_path, 
                     class: "btn btn-secondary",
