@@ -8,6 +8,7 @@ class UploadLog < ApplicationRecord
   validates :total_files_selected, presence: true, numericality: { greater_than_or_equal_to: 0 }
   validates :files_imported, presence: true, numericality: { greater_than_or_equal_to: 0 }
   validates :files_skipped, presence: true, numericality: { greater_than_or_equal_to: 0 }
+  validates :files_failed, presence: true, numericality: { greater_than_or_equal_to: 0 }
   # files_data can be empty array initially, will be populated during upload
   
   # Scopes
@@ -24,7 +25,7 @@ class UploadLog < ApplicationRecord
   
   # Ransackable attributes for ActiveAdmin filtering
   def self.ransackable_attributes(auth_object = nil)
-    ["batch_id", "completion_status", "created_at", "files_imported", "files_skipped", "session_completed_at", 
+    ["batch_id", "completion_status", "created_at", "files_imported", "files_skipped", "files_failed", "session_completed_at", 
      "session_id", "session_started_at", "total_files_selected", "updated_at", 
      "user_agent", "user_id"]
   end
@@ -59,9 +60,21 @@ class UploadLog < ApplicationRecord
     when 'incomplete'
       return 'In Progress'
     when 'complete'
-      return 'Success' if files_skipped == 0 && files_imported > 0
-      return 'Partial Success' if files_imported > 0 && files_skipped > 0
-      return 'All Failed' if files_imported == 0 && files_skipped > 0
+      # Check for actual failures first
+      if files_failed > 0
+        return 'Failed' if files_imported == 0 && files_failed == total_files_selected
+        return 'Partial Success' if files_imported > 0 && files_failed > 0
+      end
+      
+      # If no failures, check skipped files
+      if files_skipped > 0
+        return 'Some Skipped' if files_imported > 0 && files_skipped > 0
+        return 'Skipped' if files_imported == 0 && files_skipped == total_files_selected
+      end
+      
+      # Perfect success
+      return 'Successful' if files_imported > 0 && files_skipped == 0 && files_failed == 0
+      
       return 'Complete'
     else
       'Unknown'
@@ -70,12 +83,14 @@ class UploadLog < ApplicationRecord
   
   def status_color
     case status
-    when 'Success' then 'green'
-    when 'Partial Success' then 'orange'
-    when 'All Failed' then 'red'
-    when 'In Progress' then 'blue'
-    when 'Interrupted' then 'purple'
-    when 'Complete' then 'green'
+    when 'Successful' then 'green'      # bright green - no failures, no skips
+    when 'Partial Success' then 'orange' # yellow/orange - some failures
+    when 'Failed' then 'red'            # red - all failed
+    when 'Skipped' then '#006400'       # darker green - all skipped
+    when 'Some Skipped' then '#006400'  # darker green - some skipped
+    when 'In Progress' then 'blue'      # blue - still processing
+    when 'Interrupted' then 'purple'    # purple - interrupted
+    when 'Complete' then 'green'        # green - generic completion
     else 'gray'
     end
   end

@@ -2,7 +2,7 @@ ActiveAdmin.register UploadLog do
   
   # Permitted parameters
   permit_params :batch_id, :session_id, :user_agent, :total_files_selected, 
-                :files_imported, :files_skipped, :user_id
+                :files_imported, :files_skipped, :files_failed, :user_id
 
   # Index page configuration
   index do
@@ -14,7 +14,16 @@ ActiveAdmin.register UploadLog do
     end
     
     column "Files", sortable: :total_files_selected do |log|
-      "#{log.files_imported}/#{log.total_files_selected}"
+      parts = []
+      parts << "#{log.files_imported} imported" if log.files_imported > 0
+      parts << "#{log.files_skipped} skipped" if log.files_skipped > 0
+      parts << "#{log.files_failed} failed" if log.files_failed > 0
+      
+      if parts.empty?
+        "0/#{log.total_files_selected}"
+      else
+        "#{parts.join(', ')} (#{log.total_files_selected} total)"
+      end
     end
     
     column "Success Rate", sortable: false do |log|
@@ -51,6 +60,7 @@ ActiveAdmin.register UploadLog do
   filter :total_files_selected
   filter :files_imported
   filter :files_skipped
+  filter :files_failed
   filter :batch_id
 
   # Scopes for quick filtering
@@ -161,6 +171,7 @@ ActiveAdmin.register UploadLog do
         column("Total Files Selected") { |log| number_with_delimiter(log.total_files_selected) }
         column("Files Imported") { |log| number_with_delimiter(log.files_imported) }
         column("Files Skipped") { |log| number_with_delimiter(log.files_skipped) }
+        column("Files Failed") { |log| number_with_delimiter(log.files_failed) }
         column("Success Rate") { |log| "#{log.success_rate}%" }
         column("Average File Size") do |log|
           if log.files_data.any?

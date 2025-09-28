@@ -273,6 +273,7 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
             total_files_selected: total_files_selected, # Use total files from frontend
             files_imported: 0,
             files_skipped: 0,
+            files_failed: 0,
             files_data: []
           )
           Rails.logger.info "Created new UploadLog for session: #{session_id} with #{total_files_selected} total files"
@@ -403,7 +404,8 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
         # Update the upload session statistics
         upload_log.update!(
           files_imported: upload_log.files_imported + imported_count,
-          files_skipped: upload_log.files_skipped + (all_files.length - imported_count)
+          files_skipped: upload_log.files_skipped + skipped_count,
+          files_failed: upload_log.files_failed + failed_count
         )
         
         # Complete batch progress tracking
