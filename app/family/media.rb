@@ -41,26 +41,35 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
       end
     end
     
-    column "Type" do |medium|
-      status_tag medium.medium_type.humanize, class: "#{medium.medium_type}_type"
+    column "Type", sortable: false do |medium|
+      case medium.medium_type
+      when 'photo'
+        content_tag :div, "📸", style: "font-size: 20px; text-align: center;", title: "Photo"
+      when 'video'
+        content_tag :div, "🎬", style: "font-size: 20px; text-align: center;", title: "Video"
+      when 'audio'
+        content_tag :div, "🎵", style: "font-size: 20px; text-align: center;", title: "Audio"
+      else
+        content_tag :div, "📄", style: "font-size: 20px; text-align: center;", title: "Unknown"
+      end
     end
     
-        column "Processing Status", sortable: false do |medium|
-          case medium.post_processing_status
-          when 'completed'
-            if medium.post_processed?
-              status_tag "Processed", class: :ok
-            else
-              status_tag "Processing Failed", class: :error
-            end
-          when 'in_progress'
-            status_tag "Processing...", class: :warning
-          when 'not_started'
-            status_tag "Queued", class: :no
-          else
-            status_tag "Unknown", class: :error
-          end
+    column "Processed", sortable: false do |medium|
+      case medium.post_processing_status
+      when 'completed'
+        if medium.post_processed?
+          content_tag :div, "✅", style: "font-size: 18px; text-align: center; color: #28a745;", title: "Processing completed successfully"
+        else
+          content_tag :div, "❌", style: "font-size: 18px; text-align: center; color: #dc3545;", title: "Processing failed"
         end
+      when 'in_progress'
+        content_tag :div, "⏳", style: "font-size: 18px; text-align: center; color: #ffc107;", title: "Processing in progress"
+      when 'not_started'
+        content_tag :div, "⏸️", style: "font-size: 18px; text-align: center; color: #6c757d;", title: "Processing queued"
+      else
+        content_tag :div, "❓", style: "font-size: 18px; text-align: center; color: #6c757d;", title: "Unknown status"
+      end
+    end
     
     column "Title" do |medium|
       medium.mediable&.title || "Untitled"
