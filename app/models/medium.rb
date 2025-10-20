@@ -1,4 +1,7 @@
 class Medium < ApplicationRecord
+  include AASM
+  include MediumAasm
+
   belongs_to :mediable, polymorphic: true
   belongs_to :uploaded_by, class_name: 'User'
   belongs_to :user
@@ -402,7 +405,9 @@ class Medium < ApplicationRecord
   # Helper method to get the full file path (directory + filename)
   def full_file_path
     return nil unless file_path.present? && current_filename.present?
-    File.join(file_path, current_filename)
+    full_path = File.join(file_path, current_filename)
+    Rails.logger.debug "Medium#full_file_path: #{full_path} (file_path: #{file_path}, current_filename: #{current_filename})"
+    full_path
   end
   
   def file_exists?
@@ -486,12 +491,11 @@ class Medium < ApplicationRecord
       return { error: "Unsupported file type: #{uploaded_file.content_type}" }
     end
     
-    # Generate unique file path with timestamp and original filename
-    # Try to get file modification time, fall back to current time
-    file_datetime = get_file_datetime_for_naming(uploaded_file)
-    timestamp = file_datetime.strftime("%Y%m%d_%H%M%S")
+    # Generate unique file path with temporary timestamp for now
+    # The proper datetime-based filename will be set during post-processing
+    temp_timestamp = Time.current.strftime("%Y%m%d_%H%M%S")
     original_filename = uploaded_file.original_filename
-    stored_filename = "#{timestamp}-#{original_filename}"
+    stored_filename = "#{temp_timestamp}-#{original_filename}"
     
     # Ensure global uniqueness by checking for duplicates
     stored_filename = ensure_unique_filename(stored_filename)
@@ -519,7 +523,7 @@ class Medium < ApplicationRecord
     
     upload_completed_at = Time.current
     
-    # Create the specific media type record first (with dimensions)
+    # Create the specific media type record (minimal data for now)
     mediable = create_mediable_record(medium_type, uploaded_file, user, full_file_path)
     return { error: "Failed to create #{medium_type} record" } unless mediable
     
@@ -671,7 +675,7 @@ class Medium < ApplicationRecord
   def self.create_mediable_record(medium_type, uploaded_file, user, file_path)
     case medium_type
     when 'photo'
-      # Extract dimensions for photos
+      # Extract dimensions for photos (minimal data for now)
       width, height = extract_dimensions(file_path, uploaded_file.content_type)
       
       Photo.create(
@@ -716,19 +720,33 @@ class Medium < ApplicationRecord
         if datetime_intrinsic.present?
           medium.update_columns(datetime_intrinsic: datetime_intrinsic)
           Rails.logger.info "Set datetime_intrinsic: #{datetime_intrinsic} for #{medium.original_filename}"
+          
+          # Rename file to use proper datetime-based filename
+          rename_file_to_datetime_based_name(medium, datetime_intrinsic)
         else
           # No EXIF datetime - use upload time as inferred
           datetime_inferred = medium.created_at
           medium.update_columns(datetime_inferred: datetime_inferred)
           Rails.logger.info "Set datetime_inferred: #{datetime_inferred} for #{medium.original_filename}"
+          
+          # Still generate thumbnail and preview even without EXIF datetime
+          medium.mediable.generate_thumbnail if medium.mediable&.respond_to?(:generate_thumbnail)
+          medium.mediable.generate_preview if medium.mediable&.respond_to?(:generate_preview)
         end
         
         # Update Medium with location data from Photo
         if photo.latitude.present? && photo.longitude.present?
           medium.update_columns(latitude: photo.latitude, longitude: photo.longitude)
         end
+        
+        # Generate thumbnail and preview after EXIF processing
+        medium.mediable.generate_thumbnail if medium.mediable&.respond_to?(:generate_thumbnail)
+        medium.mediable.generate_preview if medium.mediable&.respond_to?(:generate_preview)
+      else
+        # If no mediable record, still try to generate thumbnail/preview
+        medium.mediable.generate_thumbnail if medium.mediable&.respond_to?(:generate_thumbnail)
+        medium.mediable.generate_preview if medium.mediable&.respond_to?(:generate_preview)
       end
-      medium.mediable.generate_thumbnail if medium.mediable&.respond_to?(:generate_thumbnail)
     when 'audio'
       # Extract audio metadata when we add audio support
       datetime_intrinsic = medium.mediable.datetime_intrinsic if medium.mediable&.respond_to?(:datetime_intrinsic)
@@ -1018,6 +1036,75 @@ class Medium < ApplicationRecord
     
     # Fall back to current time
     Time.current
+  end
+
+  # Rename file to use proper datetime-based filename during post-processing
+  def self.rename_file_to_datetime_based_name(medium, datetime)
+    Rails.logger.info "Starting file rename for medium #{medium.id}: current_filename=#{medium.current_filename}, original_filename=#{medium.original_filename}"
+    
+    # Generate new filename using proper datetime
+    timestamp = datetime.strftime("%Y%m%d_%H%M%S")
+    original_filename = medium.original_filename
+    new_filename = "#{timestamp}-#{original_filename}"
+    
+    Rails.logger.info "Generated new filename: #{new_filename}"
+    
+    # Check if the new filename would conflict with existing files
+    if Medium.where(current_filename: new_filename).where.not(id: medium.id).exists?
+      Rails.logger.warn "Cannot rename file - filename already exists: #{new_filename}"
+      return false
+    end
+    
+    # Get current file path
+    old_file_path = medium.full_file_path
+    return false unless old_file_path && File.exist?(old_file_path)
+    
+    # Generate new file path
+    new_file_path = File.join(File.dirname(old_file_path), new_filename)
+    
+    begin
+      # Rename the file on disk
+      FileUtils.mv(old_file_path, new_file_path)
+      Rails.logger.info "Renamed file from #{File.basename(old_file_path)} to #{File.basename(new_file_path)}"
+      
+      # Update the database record
+      medium.update_columns(current_filename: new_filename)
+      Rails.logger.info "Updated current_filename to: #{new_filename}"
+      
+      # Verify the update worked
+      medium.reload
+      Rails.logger.info "After reload - current_filename: #{medium.current_filename}, full_file_path: #{medium.full_file_path}"
+      
+      # Rename associated thumbnail and preview files if they exist
+      if medium.mediable&.respond_to?(:thumbnail_path) && medium.mediable.thumbnail_path
+        old_thumb_path = medium.mediable.thumbnail_path
+        if File.exist?(old_thumb_path)
+          thumb_ext = File.extname(old_thumb_path)
+          thumb_base = File.basename(old_thumb_path, thumb_ext)
+          new_thumb_base = File.basename(new_filename, File.extname(new_filename))
+          new_thumb_path = File.join(File.dirname(old_thumb_path), "#{new_thumb_base}_thumb#{thumb_ext}")
+          FileUtils.mv(old_thumb_path, new_thumb_path)
+          medium.mediable.update_columns(thumbnail_path: new_thumb_path)
+        end
+      end
+      
+      if medium.mediable&.respond_to?(:preview_path) && medium.mediable.preview_path
+        old_preview_path = medium.mediable.preview_path
+        if File.exist?(old_preview_path)
+          preview_ext = File.extname(old_preview_path)
+          preview_base = File.basename(old_preview_path, preview_ext)
+          new_preview_base = File.basename(new_filename, File.extname(new_filename))
+          new_preview_path = File.join(File.dirname(old_preview_path), "#{new_preview_base}_preview#{preview_ext}")
+          FileUtils.mv(old_preview_path, new_preview_path)
+          medium.mediable.update_columns(preview_path: new_preview_path)
+        end
+      end
+      
+      true
+    rescue => e
+      Rails.logger.error "Failed to rename file: #{e.message}"
+      false
+    end
   end
 
   private

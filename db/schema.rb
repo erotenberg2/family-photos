@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_10_20_175321) do
+ActiveRecord::Schema[8.0].define(version: 2025_10_20_212137) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -138,6 +138,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_20_175321) do
     t.bigint "event_id"
     t.bigint "subevent_id"
     t.string "current_filename", null: false
+    t.string "storage_state", default: "unsorted", null: false
     t.index ["created_at"], name: "index_media_on_created_at"
     t.index ["current_filename"], name: "index_media_on_current_filename"
     t.index ["datetime_inferred"], name: "index_media_on_datetime_inferred"
@@ -151,6 +152,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_20_175321) do
     t.index ["mediable_type", "mediable_id"], name: "index_media_on_mediable"
     t.index ["medium_type"], name: "index_media_on_medium_type"
     t.index ["storage_class"], name: "index_media_on_storage_class"
+    t.index ["storage_state"], name: "index_media_on_storage_state"
     t.index ["subevent_id"], name: "index_media_on_subevent_id"
     t.index ["uploaded_by_id"], name: "index_media_on_uploaded_by_id"
     t.index ["user_id"], name: "index_media_on_user_id"

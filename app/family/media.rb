@@ -96,7 +96,7 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
       medium.file_size_human
     end
     column :content_type
-    column "Storage", sortable: :storage_class do |medium|
+    column "Storage Class", sortable: :storage_class do |medium|
       case medium.storage_class
       when 'daily'
         content_tag :div, "📅", style: "font-size: 18px; text-align: center;", title: "Daily storage"
@@ -108,6 +108,24 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
         content_tag :div, "❓", style: "font-size: 18px; text-align: center;", title: "Unknown storage"
       end
     end
+    column "Storage State" do |medium|
+      case medium.aasm.current_state
+      when :unsorted
+        content_tag :div, "📂", style: "font-size: 18px; text-align: center;", title: "Unsorted storage"
+      when :daily
+        content_tag :div, "📅", style: "font-size: 18px; text-align: center;", title: "Daily storage"
+      when :event_root
+        content_tag :div, "✈️", style: "font-size: 18px; text-align: center;", title: "Event storage"
+      when :subevent_level1
+        content_tag :div, "✈️📂", style: "font-size: 18px; text-align: center;", title: "Subevent level 1 storage"
+      when :subevent_level2
+        content_tag :div, "✈️📂📂", style: "font-size: 18px; text-align: center;", title: "Subevent level 2 storage"
+      end
+    end
+    column "Transitions", sortable: false do |medium|
+      generate_transitions_menu(medium)
+    end
+    
     column :created_at
     
     actions
@@ -470,6 +488,7 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
           content_tag :div, "❓ Unknown Storage", style: "font-size: 16px;", title: "Unknown storage class"
         end
       end
+      row :storage_state
       row "Event" do |medium|
         if medium.event
           link_to medium.event.title, admin_event_path(medium.event), style: "font-weight: bold;"
@@ -574,39 +593,42 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
 
   # Handle form submission for filename editing
   controller do
-    def update
-      if params[:medium] && params[:medium][:descriptive_name].present?
-        new_descriptive_name = params[:medium][:descriptive_name].strip
-        
-        if new_descriptive_name.blank?
-          redirect_to edit_family_medium_path(resource), alert: "Descriptive name cannot be blank."
-          return
-        end
-        
-        begin
-          # Generate new filename using datetime priority scheme
-          new_filename = generate_filename_from_datetime_and_descriptive_name(resource, new_descriptive_name)
-          
-          # Check if the new filename would conflict with existing files
-          if Medium.where(current_filename: new_filename).where.not(id: resource.id).exists?
-            redirect_to edit_family_medium_path(resource), alert: "A file with this name already exists."
-            return
-          end
-          
-          # Update the current_filename, which will trigger the callback to rename the file
-          resource.update!(current_filename: new_filename)
-          
-          redirect_to family_medium_path(resource), notice: "Filename updated successfully to '#{new_filename}'."
-          return
-        rescue => e
-          redirect_to edit_family_medium_path(resource), alert: "Error updating filename: #{e.message}"
-          return
-        end
-      end
-      
-      # If no descriptive_name provided, do normal update
-      super
-    end
+    helper MediumTransitionsHelper
+    
+    # COMMENTED OUT FOR DEBUGGING - investigating why member_action isn't being called
+    # def update
+    #   if params[:medium] && params[:medium][:descriptive_name].present?
+    #     new_descriptive_name = params[:medium][:descriptive_name].strip
+    #     
+    #     if new_descriptive_name.blank?
+    #       redirect_to edit_family_medium_path(resource), alert: "Descriptive name cannot be blank."
+    #       return
+    #     end
+    #     
+    #     begin
+    #       # Generate new filename using datetime priority scheme
+    #       new_filename = generate_filename_from_datetime_and_descriptive_name(resource, new_descriptive_name)
+    #       
+    #       # Check if the new filename would conflict with existing files
+    #       if Medium.where(current_filename: new_filename).where.not(id: resource.id).exists?
+    #         redirect_to edit_family_medium_path(resource), alert: "A file with this name already exists."
+    #         return
+    #     end
+    #     
+    #       # Update the current_filename, which will trigger the callback to rename the file
+    #       resource.update!(current_filename: new_filename)
+    #     
+    #       redirect_to family_medium_path(resource), notice: "Filename updated successfully to '#{new_filename}'."
+    #       return
+    #     rescue => e
+    #       redirect_to edit_family_medium_path(resource), alert: "Error updating filename: #{e.message}"
+    #       return
+    #     end
+    #   end
+    #   
+    #   # If no descriptive_name provided, do normal update
+    #   super
+    # end
 
     private
 
@@ -851,6 +873,20 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
     end
   end
 
-
+  # Member action to execute state transitions
+  member_action :execute_transition, method: :patch do
+    transition_event = params[:transition]
+    
+    if resource.respond_to?(transition_event)
+      begin
+        resource.send("#{transition_event}!")
+        redirect_to family_media_path, notice: "Successfully moved media to #{transition_event.humanize}"
+      rescue => e
+        redirect_to family_media_path, alert: "Failed to move media: #{e.message}"
+      end
+    else
+      redirect_to family_media_path, alert: "Invalid transition: #{transition_event}"
+    end
+  end
 
 end

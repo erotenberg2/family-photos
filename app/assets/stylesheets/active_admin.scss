@@ -41,3 +41,29 @@
     background: #cacaca !important;  // gray (ActiveAdmin default)
   }
 }
+
+// Transitions menu styles
+.transitions-form {
+  display: inline-block;
+  
+  .transitions-select {
+    border: 1px solid #ddd !important;
+    background: white !important;
+    border-radius: 3px !important;
+    cursor: pointer !important;
+    font-size: 12px !important;
+    padding: 2px 4px !important;
+    min-width: 120px;
+    
+    &:hover {
+      background: #f8f9fa !important;
+      border-color: #999 !important;
+    }
+    
+    &:focus {
+      outline: none !important;
+      border-color: #007bff !important;
+      box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25) !important;
+    }
+  }
+}
