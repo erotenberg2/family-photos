@@ -5,6 +5,16 @@ class FileOrganizationService
     
     # Move media files to daily storage based on their effective datetime
     def move_to_daily_storage(media_ids)
+      # Pre-check for OS conflicts before starting the batch
+      conflict_check = validate_batch_operation_for_os_conflicts(media_ids, 'daily')
+      if conflict_check[:has_conflicts]
+        return {
+          success_count: 0,
+          error_count: media_ids.length,
+          errors: conflict_check[:conflicts].map { |c| "OS conflict: #{c[:filename]} already exists at destination" }
+        }
+      end
+      
       results = {
         success_count: 0,
         error_count: 0,
@@ -22,18 +32,18 @@ class FileOrganizationService
             next
           end
           
-          # Generate new file path in daily storage
+          # Generate new file path in daily storage (preserve original filename)
           new_path = generate_daily_storage_path(medium)
           
           # Create directory if it doesn't exist
           FileUtils.mkdir_p(File.dirname(new_path))
           
           # Move the file
-          if File.exist?(medium.file_path)
-            FileUtils.mv(medium.file_path, new_path)
+          if File.exist?(medium.full_file_path)
+            FileUtils.mv(medium.full_file_path, new_path)
             
             # Update the database record
-            medium.update!(file_path: new_path, storage_class: 'daily')
+            medium.update!(file_path: File.dirname(new_path), current_filename: File.basename(new_path), storage_class: 'daily')
             
             results[:success_count] += 1
             Rails.logger.info "Moved #{medium.original_filename} to daily storage: #{new_path}"
@@ -55,7 +65,39 @@ class FileOrganizationService
       results
     end
     
-    private
+    # Validate batch operation for OS conflicts before starting the move
+    def validate_batch_operation_for_os_conflicts(media_ids, storage_type, event_id = nil)
+      conflicts = []
+      
+      media_ids.each do |media_id|
+        medium = Medium.find(media_id)
+        
+        case storage_type
+        when 'daily'
+          target_path = generate_daily_storage_path(medium)
+        when 'event'
+          event = Event.find(event_id)
+          event_dir = File.join(Constants::EVENTS_STORAGE, event.folder_name)
+          type_dir = File.join(event_dir, medium.medium_type.pluralize)
+          target_path = File.join(type_dir, medium.current_filename)
+        else
+          next
+        end
+        
+        if File.exist?(target_path)
+          conflicts << {
+            medium_id: medium.id,
+            filename: medium.current_filename,
+            target_path: target_path
+          }
+        end
+      end
+      
+      {
+        has_conflicts: conflicts.any?,
+        conflicts: conflicts
+      }
+    end
     
     # Generate the daily storage path based on effective datetime
     def generate_daily_storage_path(medium)
@@ -66,14 +108,13 @@ class FileOrganizationService
       month = date.month.to_s.rjust(2, '0')
       day = date.day.to_s.rjust(2, '0')
       
-      # Generate new filename with datetime
-      timestamp = date.strftime("%Y%m%d_%H%M%S")
-      base_name = File.basename(medium.original_filename, '.*')
-      extension = File.extname(medium.original_filename)
-      new_filename = "#{timestamp}_#{base_name}#{extension}"
+      # Use the current_filename from the database
+      current_filename = medium.current_filename
       
-      File.join(Constants::DAILY_STORAGE, medium.medium_type.pluralize, year, month, day, new_filename)
+      File.join(Constants::DAILY_STORAGE, medium.medium_type.pluralize, year, month, day, current_filename)
     end
+    
+    private
     
     # Clean up empty directories after moving files
     def cleanup_empty_source_directories(old_file_path)
@@ -102,6 +143,16 @@ class FileOrganizationService
   
   # Move media to event storage
   def self.move_to_event_storage(media_ids, event_id)
+    # Pre-check for OS conflicts before starting the batch
+    conflict_check = validate_batch_operation_for_os_conflicts(media_ids, 'event', event_id)
+    if conflict_check[:has_conflicts]
+      return {
+        success_count: 0,
+        error_count: media_ids.length,
+        errors: conflict_check[:conflicts].map { |c| "OS conflict: #{c[:filename]} already exists at destination" }
+      }
+    end
+    
     results = { success_count: 0, error_count: 0, errors: [] }
     
     event = Event.find(event_id)
@@ -118,27 +169,23 @@ class FileOrganizationService
           type_dir = File.join(event_dir, medium.medium_type.pluralize)
           FileUtils.mkdir_p(type_dir) unless Dir.exist?(type_dir)
           
-          # Generate new filename (YYYYMMDD_HHMMSS_originalfilename.ext)
-          date = medium.effective_datetime
-          timestamp = date.strftime("%Y%m%d_%H%M%S")
-          base_name = File.basename(medium.original_filename, '.*')
-          extension = File.extname(medium.original_filename)
-          new_filename = "#{timestamp}_#{base_name}#{extension}"
-          new_path = File.join(type_dir, new_filename)
+          # Use the current_filename from the database (preserve original filename)
+          current_filename = medium.current_filename
+          new_path = File.join(type_dir, current_filename)
           
           # Move the file
-          if File.exist?(medium.file_path)
-            if medium.file_path == new_path
+          if File.exist?(medium.full_file_path)
+            if medium.full_file_path == new_path
               # File is already in the correct location, just update the database
-              medium.update!(storage_class: 'event', event_id: event_id)
+              medium.update!(file_path: File.dirname(new_path), current_filename: File.basename(new_path), storage_class: 'event', event_id: event_id)
               results[:success_count] += 1
               Rails.logger.info "File #{medium.original_filename} already in correct location, updated database record"
             else
               # File needs to be moved
-              FileUtils.mv(medium.file_path, new_path)
+              FileUtils.mv(medium.full_file_path, new_path)
               
               # Update the database record
-              medium.update!(file_path: new_path, storage_class: 'event', event_id: event_id)
+              medium.update!(file_path: File.dirname(new_path), current_filename: File.basename(new_path), storage_class: 'event', event_id: event_id)
               
               results[:success_count] += 1
               Rails.logger.info "Moved #{medium.original_filename} to event storage: #{new_path}"

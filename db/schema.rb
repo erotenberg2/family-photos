@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_10_20_061909) do
+ActiveRecord::Schema[8.0].define(version: 2025_10_20_175321) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -137,13 +137,14 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_20_061909) do
     t.string "storage_class", default: "unsorted", null: false
     t.bigint "event_id"
     t.bigint "subevent_id"
+    t.string "current_filename", null: false
     t.index ["created_at"], name: "index_media_on_created_at"
+    t.index ["current_filename"], name: "index_media_on_current_filename"
     t.index ["datetime_inferred"], name: "index_media_on_datetime_inferred"
     t.index ["datetime_intrinsic"], name: "index_media_on_datetime_intrinsic"
     t.index ["datetime_source_last_modified"], name: "index_media_on_datetime_source_last_modified"
     t.index ["datetime_user"], name: "index_media_on_datetime_user"
     t.index ["event_id"], name: "index_media_on_event_id"
-    t.index ["file_path"], name: "index_media_on_file_path", unique: true
     t.index ["latitude"], name: "index_media_on_latitude"
     t.index ["longitude"], name: "index_media_on_longitude"
     t.index ["md5_hash"], name: "index_media_on_md5_hash", unique: true

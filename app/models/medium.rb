@@ -20,7 +20,8 @@ class Medium < ApplicationRecord
   }
   
   # Validations for generic media attributes
-  validates :file_path, presence: true, uniqueness: true
+  validates :file_path, presence: true
+  validates :current_filename, presence: true, uniqueness: true
   validates :md5_hash, presence: true, uniqueness: true
   validates :file_size, presence: true, numericality: { greater_than: 0 }
   validates :original_filename, presence: true
@@ -44,14 +45,242 @@ class Medium < ApplicationRecord
     message: 'must be a valid format for the medium type'
   }
 
+  # Callbacks for file operations
+  before_update :rename_file_on_disk, if: :current_filename_changed?
+  after_update :rename_file_if_datetime_changed, if: :effective_datetime_changed?
+
+  # Virtual attribute for filename editing
+  attr_accessor :descriptive_name
+
+  # Set initial descriptive_name from current_filename
+  def descriptive_name
+    return @descriptive_name if @descriptive_name.present?
+    return "" if current_filename.blank?
+    
+    # Remove file extension
+    name_without_ext = File.basename(current_filename, '.*')
+    
+    # Extract the part after the first dash (descriptive part)
+    if name_without_ext.include?('-')
+      parts = name_without_ext.split('-')
+      if parts.length > 1
+        # Join all parts after the first one (in case there are multiple dashes in the descriptive part)
+        parts[1..-1].join('-')
+      else
+        ""
+      end
+    else
+      ""
+    end
+  end
+
   def self.ransackable_attributes(auth_object = nil)
-    ["client_file_path", "content_type", "created_at", "datetime_inferred", "datetime_intrinsic", "datetime_source_last_modified", 
+    ["client_file_path", "content_type", "created_at", "current_filename", "datetime_inferred", "datetime_intrinsic", "datetime_source_last_modified", 
      "datetime_user", "event_id", "file_path", "file_size", "id", "latitude", "longitude", "md5_hash", "medium_type", "original_filename", 
      "storage_class", "subevent_id", "updated_at", "uploaded_by_id", "user_id"]
   end
 
   def self.ransackable_associations(auth_object = nil)
     ["event", "mediable", "subevent", "uploaded_by", "user"]
+  end
+  
+  # Debug method to find missing files
+  def self.find_missing_files
+    Rails.logger.info "=== SEARCHING FOR MISSING FILES ==="
+    missing_files = []
+    
+    Medium.all.each do |medium|
+      if medium.file_path.present? && medium.current_filename.present?
+        unless File.exist?(medium.full_file_path)
+          missing_files << {
+            id: medium.id,
+            original_filename: medium.original_filename,
+            file_path: medium.full_file_path,
+            storage_class: medium.storage_class,
+            event_id: medium.event_id,
+            subevent_id: medium.subevent_id
+          }
+        end
+      end
+    end
+    
+    Rails.logger.info "Found #{missing_files.count} missing files:"
+    missing_files.each do |missing|
+      Rails.logger.info "Medium #{missing[:id]}: #{missing[:original_filename]}"
+      Rails.logger.info "  Expected at: #{missing[:file_path]}"
+      Rails.logger.info "  Storage class: #{missing[:storage_class]}"
+      Rails.logger.info "  Event ID: #{missing[:event_id]}, Subevent ID: #{missing[:subevent_id]}"
+    end
+    
+    Rails.logger.info "=== END SEARCHING FOR MISSING FILES ==="
+    missing_files
+  end
+  
+  # Method to search for a file in all storage directories
+  def self.search_for_file(filename)
+    require_relative '../../lib/constants'
+    Rails.logger.info "=== SEARCHING FOR FILE: #{filename} ==="
+    
+    found_paths = []
+    
+    # Search in all storage directories
+    [Constants::UNSORTED_STORAGE, Constants::DAILY_STORAGE, Constants::EVENTS_STORAGE].each do |storage_base|
+      next unless Dir.exist?(storage_base)
+      
+      Rails.logger.info "Searching in: #{storage_base}"
+      
+      # Search recursively
+      Dir.glob(File.join(storage_base, '**', '*')).each do |file_path|
+        next unless File.file?(file_path)
+        
+        if File.basename(file_path) == filename || File.basename(file_path).include?(File.basename(filename, '.*'))
+          found_paths << file_path
+          Rails.logger.info "Found: #{file_path}"
+        end
+      end
+    end
+    
+    Rails.logger.info "Found #{found_paths.count} matching files"
+    Rails.logger.info "=== END SEARCHING FOR FILE ==="
+    found_paths
+  end
+  
+  # Method to ensure filename uniqueness in the database
+  # Uses case-insensitive exact matching (including extension)
+  def self.ensure_unique_filename(filename)
+    # Check if filename already exists in database (case-insensitive)
+    unless is_filename_unique_in_database(filename)
+      # Filename exists in database, need to make it unique
+      extension = File.extname(filename)
+      base_name = File.basename(filename, extension)
+      
+      # Try adding -(1), -(2), etc.
+      counter = 1
+      loop do
+        new_filename = "#{base_name}-(#{counter})#{extension}"
+        
+        # Check if this new filename is also unique in database
+        if is_filename_unique_in_database(new_filename)
+          Rails.logger.info "Filename conflict resolved: #{filename} -> #{new_filename} (database conflict)"
+          return new_filename
+        end
+        
+        counter += 1
+        break if counter > 1000 # Safety limit
+      end
+      
+      Rails.logger.warn "Could not resolve filename conflict for: #{filename} (database conflict)"
+      return filename # Return original if we can't resolve
+    end
+    
+    # Filename is unique in database
+    return filename
+  end
+  
+  # Helper method to check if a filename is unique in the database (case-insensitive)
+  def self.is_filename_unique_in_database(filename)
+    # Check against existing current_filename values in the database
+    Medium.where.not(current_filename: nil).each do |medium|
+      return false if medium.current_filename.downcase == filename.downcase
+    end
+    
+    true # Filename is unique in database
+  end
+  
+  # Helper method to check if a filename conflicts with OS files (for validation)
+  def self.check_os_filename_conflicts(filename)
+    require_relative '../../lib/constants'
+    conflicts = []
+    
+    [Constants::UNSORTED_STORAGE, Constants::DAILY_STORAGE, Constants::EVENTS_STORAGE].each do |storage_base|
+      next unless Dir.exist?(storage_base)
+      
+      Dir.glob(File.join(storage_base, '**', '*')).each do |existing_path|
+        next unless File.file?(existing_path)
+        
+        existing_filename = File.basename(existing_path)
+        if existing_filename.downcase == filename.downcase
+          conflicts << existing_path
+        end
+      end
+    end
+    
+    conflicts
+  end
+  
+  # Validate batch operations for OS filename conflicts
+  def self.validate_batch_operation_for_conflicts(media_ids, operation_type)
+    conflicts = []
+    
+    Medium.where(id: media_ids).each do |medium|
+      current_filename = medium.current_filename
+      os_conflicts = check_os_filename_conflicts(current_filename)
+      
+      if os_conflicts.any?
+        conflicts << {
+          medium_id: medium.id,
+          filename: current_filename,
+          os_conflicts: os_conflicts,
+          operation: operation_type
+        }
+      end
+    end
+    
+    conflicts
+  end
+  
+  # Method to fix orphaned media records (files that don't exist where database says they should)
+  def self.fix_orphaned_media
+    Rails.logger.info "=== FIXING ORPHANED MEDIA RECORDS ==="
+    fixed_count = 0
+    unfixable_count = 0
+    
+    missing_files = find_missing_files
+    
+    missing_files.each do |missing|
+      medium = Medium.find(missing[:id])
+      Rails.logger.info "Attempting to fix Medium #{medium.id}: #{medium.original_filename}"
+      
+      # Search for the file using current_filename
+      found_files = search_for_file(medium.current_filename)
+      
+      if found_files.any?
+        # Found the file! Update the database path
+        new_path = found_files.first
+        Rails.logger.info "Found file at: #{new_path}"
+        
+        # Determine correct storage class based on path
+        new_storage_class = if new_path.include?('/unsorted/')
+          'unsorted'
+        elsif new_path.include?('/daily/')
+          'daily'
+        elsif new_path.include?('/events/')
+          'event'
+        else
+          'unsorted' # fallback
+        end
+        
+        medium.update!(
+          file_path: new_path,
+          storage_class: new_storage_class,
+          event_id: nil, # Reset event associations since we're fixing orphaned records
+          subevent_id: nil
+        )
+        
+        Rails.logger.info "✅ Fixed Medium #{medium.id} - updated path to: #{new_path}"
+        fixed_count += 1
+      else
+        Rails.logger.warn "❌ Could not find file for Medium #{medium.id}: #{medium.original_filename}"
+        Rails.logger.warn "❌ This medium record may need manual attention"
+        unfixable_count += 1
+      end
+    end
+    
+    Rails.logger.info "Fixed #{fixed_count} orphaned media records"
+    Rails.logger.info "Could not fix #{unfixable_count} orphaned media records"
+    Rails.logger.info "=== END FIXING ORPHANED MEDIA RECORDS ==="
+    
+    { fixed: fixed_count, unfixable: unfixable_count }
   end
 
   # Scopes
@@ -135,6 +364,11 @@ class Medium < ApplicationRecord
     'none'
   end
 
+  # Check if effective datetime changed
+  def effective_datetime_changed?
+    datetime_user_changed? || datetime_intrinsic_changed? || datetime_inferred_changed?
+  end
+
   # Legacy method for backwards compatibility
   def taken_date
     effective_datetime || created_at
@@ -165,8 +399,14 @@ class Medium < ApplicationRecord
   end
   
   # Check if file exists
+  # Helper method to get the full file path (directory + filename)
+  def full_file_path
+    return nil unless file_path.present? && current_filename.present?
+    File.join(file_path, current_filename)
+  end
+  
   def file_exists?
-    file_path.present? && File.exist?(file_path)
+    full_file_path.present? && File.exist?(full_file_path)
   end
 
   # Get location from mediable's intrinsic file info (e.g., EXIF data)
@@ -246,44 +486,49 @@ class Medium < ApplicationRecord
       return { error: "Unsupported file type: #{uploaded_file.content_type}" }
     end
     
-    # Generate unique file path
-    timestamp = Time.current.strftime("%Y%m%d_%H%M%S")
-    random_suffix = SecureRandom.hex(4)
-    file_extension = File.extname(uploaded_file.original_filename)
-    stored_filename = "#{timestamp}_#{random_suffix}#{file_extension}"
+    # Generate unique file path with timestamp and original filename
+    # Try to get file modification time, fall back to current time
+    file_datetime = get_file_datetime_for_naming(uploaded_file)
+    timestamp = file_datetime.strftime("%Y%m%d_%H%M%S")
+    original_filename = uploaded_file.original_filename
+    stored_filename = "#{timestamp}-#{original_filename}"
+    
+    # Ensure global uniqueness by checking for duplicates
+    stored_filename = ensure_unique_filename(stored_filename)
     
     # Create upload directory in unsorted storage
     require_relative '../../lib/constants'
     upload_dir = File.join(Constants::UNSORTED_STORAGE, medium_type.pluralize)
     FileUtils.mkdir_p(upload_dir) unless Dir.exist?(upload_dir)
     
-    # Full file path
-    file_path = File.join(upload_dir, stored_filename)
+    # Full file path for saving
+    full_file_path = File.join(upload_dir, stored_filename)
     
     # Save file to disk
-    save_uploaded_file_to_path(uploaded_file, file_path)
+    save_uploaded_file_to_path(uploaded_file, full_file_path)
     
     # Calculate MD5 hash
-    md5_hash = Digest::MD5.file(file_path).hexdigest
+    md5_hash = Digest::MD5.file(full_file_path).hexdigest
     
     # Check for duplicates
     existing_medium = find_by(md5_hash: md5_hash)
     if existing_medium
-      File.delete(file_path) # Clean up duplicate file
+      File.delete(full_file_path) # Clean up duplicate file
       return { error: "Duplicate file already exists", existing: existing_medium }
     end
     
     upload_completed_at = Time.current
     
     # Create the specific media type record first (with dimensions)
-    mediable = create_mediable_record(medium_type, uploaded_file, user, file_path)
+    mediable = create_mediable_record(medium_type, uploaded_file, user, full_file_path)
     return { error: "Failed to create #{medium_type} record" } unless mediable
     
     # Create Medium record with timing information
     medium = new(
-      file_path: file_path,
-      file_size: File.size(file_path),
+      file_path: upload_dir,  # Store only the directory path
+      file_size: File.size(full_file_path),
       original_filename: uploaded_file.original_filename,
+      current_filename: stored_filename,
       content_type: uploaded_file.content_type,
       md5_hash: md5_hash,
       medium_type: medium_type,
@@ -326,7 +571,7 @@ class Medium < ApplicationRecord
       { success: true, medium: medium }
     else
       # Clean up files if creation failed
-      File.delete(file_path) if File.exist?(file_path)
+      File.delete(full_file_path) if File.exist?(full_file_path)
       mediable.destroy if mediable
       
       error_message = medium.errors.full_messages.join(', ')
@@ -552,7 +797,7 @@ class Medium < ApplicationRecord
     Rails.logger.info "Starting cleanup of orphaned files in storage"
     
     # Get all file paths from database
-    db_file_paths = pluck(:file_path).to_set
+    db_file_paths = all.map(&:full_file_path).compact.to_set
     Rails.logger.info "Found #{db_file_paths.size} files in database"
     
     # Get all files in storage directories
@@ -691,6 +936,162 @@ class Medium < ApplicationRecord
     # For now, use current time as the source modification time
     # This represents when the file was uploaded/processed
     Time.current
+  end
+
+  # Get the appropriate datetime for file naming during import
+  def self.get_file_datetime_for_naming(uploaded_file)
+    # Try to get the file's modification time from the tempfile
+    begin
+      if uploaded_file.tempfile && File.exist?(uploaded_file.tempfile.path)
+        file_mtime = File.mtime(uploaded_file.tempfile.path)
+        # Only use file modification time if it's reasonable (not too old, not in the future)
+        if file_mtime > 1.year.ago && file_mtime < 1.day.from_now
+          return file_mtime
+        end
+      end
+    rescue => e
+      Rails.logger.debug "Could not get file modification time: #{e.message}"
+    end
+    
+    # Fall back to current time
+    Time.current
+  end
+
+  private
+
+  # Callback to rename file on disk when current_filename changes
+  def rename_file_on_disk
+    old_filename = current_filename_was
+    new_filename = current_filename
+    
+    return if old_filename == new_filename || old_filename.blank? || new_filename.blank?
+    
+    old_full_path = File.join(file_path, old_filename)
+    new_full_path = File.join(file_path, new_filename)
+    
+    Rails.logger.info "=== RENAMING FILE ON DISK ==="
+    Rails.logger.info "Old path: #{old_full_path}"
+    Rails.logger.info "New path: #{new_full_path}"
+    
+    if File.exist?(old_full_path)
+      begin
+        FileUtils.mv(old_full_path, new_full_path)
+        Rails.logger.info "✅ Successfully renamed file from '#{old_filename}' to '#{new_filename}'"
+        
+        # Also rename thumbnail and preview files if they exist
+        rename_associated_files(old_filename, new_filename)
+        
+      rescue => e
+        Rails.logger.error "❌ Failed to rename file: #{e.message}"
+        # Add error to prevent saving the database record
+        errors.add(:current_filename, "Failed to rename file on disk: #{e.message}")
+        throw(:abort)
+      end
+    else
+      Rails.logger.warn "⚠️ Old file not found at: #{old_full_path}"
+      # Don't prevent saving, just log the warning
+    end
+    
+    Rails.logger.info "=== END RENAMING FILE ON DISK ==="
+  end
+
+  # Callback to rename file if effective datetime changed significantly
+  def rename_file_if_datetime_changed
+    # Only rename if the datetime change is significant (more than 1 hour difference)
+    old_effective_datetime = effective_datetime_was
+    new_effective_datetime = effective_datetime
+    
+    return unless old_effective_datetime.present? && new_effective_datetime.present?
+    return if (old_effective_datetime - new_effective_datetime).abs < 1.hour
+    
+    Rails.logger.info "=== RENAMING FILE DUE TO DATETIME CHANGE ==="
+    Rails.logger.info "Old datetime: #{old_effective_datetime}"
+    Rails.logger.info "New datetime: #{new_effective_datetime}"
+    
+    # Generate new filename using effective datetime
+    new_filename = generate_filename_from_effective_datetime
+    
+    # Check if the new filename would conflict
+    if Medium.where(current_filename: new_filename).where.not(id: id).exists?
+      Rails.logger.warn "⚠️ Cannot rename file due to conflict: #{new_filename}"
+      return
+    end
+    
+    # Rename the file
+    old_full_path = full_file_path
+    new_full_path = File.join(file_path, new_filename)
+    
+    if File.exist?(old_full_path)
+      begin
+        FileUtils.mv(old_full_path, new_full_path)
+        update_column(:current_filename, new_filename)
+        
+        # Also rename associated files
+        rename_associated_files(current_filename_was, new_filename)
+        
+        Rails.logger.info "✅ Successfully renamed file due to datetime change: #{new_filename}"
+      rescue => e
+        Rails.logger.error "❌ Failed to rename file due to datetime change: #{e.message}"
+      end
+    end
+    
+    Rails.logger.info "=== END RENAMING FILE DUE TO DATETIME CHANGE ==="
+  end
+
+  # Generate filename using effective datetime
+  def generate_filename_from_effective_datetime
+    effective_dt = effective_datetime || created_at
+    timestamp = effective_dt.strftime("%Y%m%d_%H%M%S")
+    
+    # Extract descriptive name from current filename
+    current_name = current_filename || original_filename
+    if current_name.include?('-')
+      descriptive_part = current_name.split('-', 2)[1] || File.basename(current_name, '.*')
+    else
+      descriptive_part = File.basename(current_name, '.*')
+    end
+    
+    extension = File.extname(current_name)
+    "#{timestamp}-#{descriptive_part}#{extension}"
+  end
+
+  # Rename associated thumbnail and preview files
+  def rename_associated_files(old_filename, new_filename)
+    return unless medium_type == 'photo' && mediable.present?
+    
+    old_base = File.basename(old_filename, '.*')
+    new_base = File.basename(new_filename, '.*')
+    old_ext = File.extname(old_filename)
+    
+    # Rename thumbnail
+    if mediable.thumbnail_path.present? && File.exist?(mediable.thumbnail_path)
+      old_thumb_path = mediable.thumbnail_path
+      if old_thumb_path.include?(old_base)
+        new_thumb_path = old_thumb_path.gsub(old_base, new_base)
+        begin
+          FileUtils.mv(old_thumb_path, new_thumb_path)
+          mediable.update_column(:thumbnail_path, new_thumb_path)
+          Rails.logger.info "✅ Renamed thumbnail: #{old_thumb_path} -> #{new_thumb_path}"
+        rescue => e
+          Rails.logger.error "❌ Failed to rename thumbnail: #{e.message}"
+        end
+      end
+    end
+    
+    # Rename preview
+    if mediable.preview_path.present? && File.exist?(mediable.preview_path)
+      old_preview_path = mediable.preview_path
+      if old_preview_path.include?(old_base)
+        new_preview_path = old_preview_path.gsub(old_base, new_base)
+        begin
+          FileUtils.mv(old_preview_path, new_preview_path)
+          mediable.update_column(:preview_path, new_preview_path)
+          Rails.logger.info "✅ Renamed preview: #{old_preview_path} -> #{new_preview_path}"
+        rescue => e
+          Rails.logger.error "❌ Failed to rename preview: #{e.message}"
+        end
+      end
+    end
   end
 
 end

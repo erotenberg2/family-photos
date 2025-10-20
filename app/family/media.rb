@@ -8,12 +8,13 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
             'data-import-popup-url': import_media_popup_family_media_path
   end
 
+
   # Permitted parameters
   permit_params :file_path, :file_size, :original_filename, :content_type, :md5_hash,
-                :datetime_user, :datetime_intrinsic, :datetime_inferred, :medium_type, :storage_class, :uploaded_by_id, :user_id
+                :datetime_user, :datetime_intrinsic, :datetime_inferred, :medium_type, :storage_class, :uploaded_by_id, :user_id, :descriptive_name
 
   # Index page configuration
-  index do
+  index do 
     selectable_column
     
     column "Thumbnail", sortable: false do |medium|
@@ -80,6 +81,7 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
     end
     
     column :original_filename
+    column :current_filename
     column :user
     column :uploaded_by
     column :effective_datetime do |medium|
@@ -422,6 +424,7 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
       end
       row :original_filename
       row :file_path
+      row :current_filename
       row :content_type
       row :file_size do |resource|
         resource.file_size_human
@@ -547,6 +550,78 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
           end
         end
       end
+    end
+  end
+
+  # Form for editing media
+  form do |f|
+    f.inputs "Media Information" do
+      f.input :original_filename, input_html: { readonly: true }
+      f.input :current_filename, input_html: { readonly: true }
+      f.input :content_type, input_html: { readonly: true }
+      f.input :file_size, input_html: { readonly: true }
+    end
+
+    f.inputs "Edit Filename" do
+      f.input :descriptive_name, 
+              label: "Descriptive Name",
+              hint: "Enter a descriptive name for this file. The timestamp and extension will be preserved automatically.",
+              placeholder: "Enter descriptive name"
+    end
+
+    f.actions
+  end
+
+  # Handle form submission for filename editing
+  controller do
+    def update
+      if params[:medium] && params[:medium][:descriptive_name].present?
+        new_descriptive_name = params[:medium][:descriptive_name].strip
+        
+        if new_descriptive_name.blank?
+          redirect_to edit_family_medium_path(resource), alert: "Descriptive name cannot be blank."
+          return
+        end
+        
+        begin
+          # Generate new filename using datetime priority scheme
+          new_filename = generate_filename_from_datetime_and_descriptive_name(resource, new_descriptive_name)
+          
+          # Check if the new filename would conflict with existing files
+          if Medium.where(current_filename: new_filename).where.not(id: resource.id).exists?
+            redirect_to edit_family_medium_path(resource), alert: "A file with this name already exists."
+            return
+          end
+          
+          # Update the current_filename, which will trigger the callback to rename the file
+          resource.update!(current_filename: new_filename)
+          
+          redirect_to family_medium_path(resource), notice: "Filename updated successfully to '#{new_filename}'."
+          return
+        rescue => e
+          redirect_to edit_family_medium_path(resource), alert: "Error updating filename: #{e.message}"
+          return
+        end
+      end
+      
+      # If no descriptive_name provided, do normal update
+      super
+    end
+
+    private
+
+    def generate_filename_from_datetime_and_descriptive_name(medium, descriptive_name)
+      # Use the effective datetime for the timestamp part
+      effective_datetime = medium.effective_datetime || medium.created_at
+      
+      # Format timestamp as YYYYMMDD_HHMMSS
+      timestamp = effective_datetime.strftime("%Y%m%d_%H%M%S")
+      
+      # Get file extension from current filename
+      extension = File.extname(medium.current_filename)
+      
+      # Create new filename: YYYYMMDD_HHMMSS-descriptive_name.extension
+      "#{timestamp}-#{descriptive_name}#{extension}"
     end
   end
 
@@ -775,5 +850,7 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
       render layout: false
     end
   end
+
+
 
 end

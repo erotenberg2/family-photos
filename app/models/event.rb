@@ -11,6 +11,8 @@ class Event < ApplicationRecord
   # Callbacks for folder management
   after_create :set_initial_folder_path
   after_update :rename_event_folder, if: :saved_change_to_title?
+  before_destroy :move_media_back_to_unsorted
+  after_destroy :cleanup_event_folder_if_safe
   
   # Debug callback to see if any update is happening
   after_update :debug_event_update
@@ -260,5 +262,175 @@ class Event < ApplicationRecord
     update_column(:folder_path, folder_name_value)
     Rails.logger.info "✅ Set folder_path to: '#{folder_name_value}'"
     Rails.logger.info "=== END SETTING INITIAL FOLDER PATH ==="
+  end
+  
+  def move_media_back_to_unsorted
+    Rails.logger.info "=== MOVING MEDIA BACK TO UNSORTED (EVENT DELETION) ==="
+    Rails.logger.info "Event: #{title} (ID: #{id})"
+    Rails.logger.info "Media count to move: #{media.count}"
+    
+    # Debug: Check if there are any media records that should be associated
+    all_media_with_event = Medium.where(event_id: id)
+    Rails.logger.info "DEBUG: Media with event_id=#{id}: #{all_media_with_event.count}"
+    all_media_with_event.each do |m|
+      Rails.logger.info "DEBUG: Medium #{m.id}: #{m.original_filename} at #{m.file_path}"
+    end
+    
+    # Track success/failure for folder cleanup decision
+    @media_move_success = true
+    @failed_media_count = 0
+    
+    return if media.empty?
+    
+    require_relative '../../lib/constants'
+    
+    # Move all media back to unsorted storage
+    media.each do |medium|
+      Rails.logger.info "Moving Medium #{medium.id} (#{medium.original_filename}) back to unsorted"
+      Rails.logger.info "  Current file path: #{medium.full_file_path}"
+      Rails.logger.info "  Current file exists: #{File.exist?(medium.full_file_path) if medium.full_file_path}"
+      
+      begin
+        if medium.file_path && medium.current_filename && File.exist?(medium.full_file_path)
+          # Use the current_filename from the database
+          current_filename = medium.current_filename
+          
+          # Determine storage directory based on medium type
+          type_dir = File.join(Constants::UNSORTED_STORAGE, medium.medium_type.pluralize)
+          FileUtils.mkdir_p(type_dir) unless Dir.exist?(type_dir)
+          
+          new_path = File.join(type_dir, current_filename)
+          
+          # Handle filename conflicts by adding -(1), -(2), etc. (database-based)
+          if File.exist?(new_path) || !Medium.is_filename_unique_in_database(current_filename)
+            extension = File.extname(current_filename)
+            base_name = File.basename(current_filename, extension)
+            
+            counter = 1
+            loop do
+              new_filename = "#{base_name}-(#{counter})#{extension}"
+              new_path = File.join(type_dir, new_filename)
+              
+              if Medium.is_filename_unique_in_database(new_filename)
+                Rails.logger.info "  ⚠️ Filename conflict resolved: #{current_filename} -> #{new_filename}"
+                break
+              end
+              
+              counter += 1
+              break if counter > 1000 # Safety limit
+            end
+          end
+          
+          Rails.logger.info "  Target directory: #{type_dir}"
+          Rails.logger.info "  Target directory exists: #{Dir.exist?(type_dir)}"
+          Rails.logger.info "  New file path: #{new_path}"
+          Rails.logger.info "  New path already exists: #{File.exist?(new_path)}"
+          
+          # Move the file
+          Rails.logger.info "  Attempting to move file..."
+          FileUtils.mv(medium.full_file_path, new_path)
+          
+          # Verify the move was successful
+          if File.exist?(new_path)
+            Rails.logger.info "  ✅ File move verified - file exists at new location"
+            
+            # Update the medium record
+            medium.update!(
+              file_path: type_dir,  # Store only the directory path
+              current_filename: File.basename(new_path),
+              storage_class: 'unsorted',
+              event_id: nil,
+              subevent_id: nil
+            )
+            
+            Rails.logger.info "  ✅ Database updated successfully"
+            Rails.logger.info "  ✅ Moved Medium #{medium.id} to: #{new_path}"
+          else
+            Rails.logger.error "  ❌ FILE MOVE FAILED - File does not exist at new location!"
+            Rails.logger.error "  ❌ Original file still exists: #{File.exist?(medium.full_file_path)}"
+            Rails.logger.error "  ❌ New file exists: #{File.exist?(new_path)}"
+            raise "File move verification failed - file not found at destination"
+          end
+        else
+          Rails.logger.warn "  ⚠️ Medium #{medium.id} file not found at: #{medium.full_file_path}"
+          Rails.logger.warn "  ⚠️ File path present: #{medium.file_path.present?}"
+          Rails.logger.warn "  ⚠️ Current filename present: #{medium.current_filename.present?}"
+          Rails.logger.warn "  ⚠️ File exists: #{File.exist?(medium.full_file_path) if medium.full_file_path}"
+          
+          # Still update the database record even if file is missing
+          medium.update!(
+            current_filename: current_filename,
+            storage_class: 'unsorted',
+            event_id: nil,
+            subevent_id: nil
+          )
+          
+          Rails.logger.warn "  ⚠️ Database updated despite missing file"
+        end
+      rescue => e
+        Rails.logger.error "  ❌ Failed to move Medium #{medium.id}: #{e.message}"
+        Rails.logger.error "  ❌ Backtrace: #{e.backtrace.first(3).join('\n')}"
+        
+        # Don't update the database if the file move failed
+        Rails.logger.error "  ❌ Database NOT updated due to file move failure"
+        
+        # Track failure for folder cleanup decision
+        @media_move_success = false
+        @failed_media_count += 1
+      end
+    end
+    
+    Rails.logger.info "=== END MOVING MEDIA BACK TO UNSORTED ==="
+    Rails.logger.info "Media move success: #{@media_move_success}"
+    Rails.logger.info "Failed media count: #{@failed_media_count}"
+  end
+  
+  def cleanup_event_folder_if_safe
+    Rails.logger.info "=== CLEANING UP EVENT FOLDER (SAFE MODE) ==="
+    Rails.logger.info "Event: #{title} (ID: #{id})"
+    Rails.logger.info "Folder path: '#{folder_path}'"
+    Rails.logger.info "Media move success: #{@media_move_success}"
+    Rails.logger.info "Failed media count: #{@failed_media_count}"
+    
+    return unless folder_path.present?
+    
+    # Only cleanup folder if all media was successfully moved
+    if @media_move_success && @failed_media_count == 0
+      Rails.logger.info "✅ All media successfully moved - proceeding with folder cleanup"
+      cleanup_event_folder
+    else
+      Rails.logger.warn "⚠️ SKIPPING folder cleanup due to media move failures!"
+      Rails.logger.warn "⚠️ Failed media count: #{@failed_media_count}"
+      Rails.logger.warn "⚠️ Event folder preserved to prevent data loss"
+      Rails.logger.warn "⚠️ Manual cleanup may be required"
+    end
+    
+    Rails.logger.info "=== END CLEANING UP EVENT FOLDER (SAFE MODE) ==="
+  end
+  
+  def cleanup_event_folder
+    Rails.logger.info "=== CLEANING UP EVENT FOLDER ==="
+    Rails.logger.info "Event: #{title} (ID: #{id})"
+    Rails.logger.info "Folder path: '#{folder_path}'"
+    
+    return unless folder_path.present?
+    
+    require_relative '../../lib/constants'
+    
+    event_folder_path = File.join(Constants::EVENTS_STORAGE, folder_path)
+    
+    if Dir.exist?(event_folder_path)
+      begin
+        Rails.logger.info "Removing event folder: #{event_folder_path}"
+        FileUtils.rm_rf(event_folder_path)
+        Rails.logger.info "✅ Successfully removed event folder"
+      rescue => e
+        Rails.logger.error "❌ Failed to remove event folder: #{e.message}"
+      end
+    else
+      Rails.logger.info "Event folder does not exist: #{event_folder_path}"
+    end
+    
+    Rails.logger.info "=== END CLEANING UP EVENT FOLDER ==="
   end
 end

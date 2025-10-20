@@ -225,21 +225,21 @@ class Photo < ApplicationRecord
   public
 
   def generate_thumbnail_path
-    return nil unless file_path
+    return nil unless medium&.full_file_path
     
-    dir = File.dirname(file_path)
-    ext = File.extname(file_path)
-    base = File.basename(file_path, ext)
+    dir = File.dirname(medium.full_file_path)
+    ext = File.extname(medium.full_file_path)
+    base = File.basename(medium.full_file_path, ext)
     
     File.join(dir, "thumbs", "#{base}_thumb#{ext}")
   end
 
   def generate_preview_path
-    return nil unless file_path
+    return nil unless medium&.full_file_path
     
-    dir = File.dirname(file_path)
-    ext = File.extname(file_path)
-    base = File.basename(file_path, ext)
+    dir = File.dirname(medium.full_file_path)
+    ext = File.extname(medium.full_file_path)
+    base = File.basename(medium.full_file_path, ext)
     
     File.join(dir, "previews", "#{base}_preview#{ext}")
   end
@@ -276,11 +276,11 @@ class Photo < ApplicationRecord
 
   # Debug method to see all available EXIF fields
   def debug_all_exif_fields
-    return "No file path" unless file_path.present? && File.exist?(file_path)
+    return "No file path" unless medium&.full_file_path.present? && File.exist?(medium.full_file_path)
     
     begin
       require 'exifr/jpeg'
-      exif = EXIFR::JPEG.new(file_path)
+      exif = EXIFR::JPEG.new(medium.full_file_path)
       return "No EXIF data" unless exif
       
       # Get all available methods/fields
@@ -303,7 +303,7 @@ class Photo < ApplicationRecord
   end
 
   def generate_thumbnail
-    return unless file_path.present? && File.exist?(file_path)
+    return unless medium&.full_file_path.present? && File.exist?(medium.full_file_path)
     
     begin
       require 'mini_magick'
@@ -314,12 +314,12 @@ class Photo < ApplicationRecord
       # Generate preview (larger, for show pages)  
       generate_image_variant(:preview)
       
-      Rails.logger.info "Generated thumbnail and preview for: #{file_path}"
+      Rails.logger.info "Generated thumbnail and preview for: #{medium.full_file_path}"
       
       save if changed?
       
     rescue => e
-      Rails.logger.error "Failed to generate thumbnail/preview for #{file_path}: #{e.message}"
+      Rails.logger.error "Failed to generate thumbnail/preview for #{medium.full_file_path}: #{e.message}"
       # Clear all generated image fields on failure
       self.thumbnail_path = nil
       self.thumbnail_width = nil
@@ -335,9 +335,9 @@ class Photo < ApplicationRecord
 
 
   def extract_metadata_from_exif
-    return unless medium&.file_path&.present?
+    return unless medium&.full_file_path&.present?
     
-    exif_info = extract_exif_data(medium.file_path)
+    exif_info = extract_exif_data(medium.full_file_path)
     self.exif_data = exif_info
     
     # Extract specific fields from the complete EXIF hash for database columns
@@ -470,7 +470,7 @@ class Photo < ApplicationRecord
     FileUtils.mkdir_p(dir) unless Dir.exist?(dir)
     
     # Open and resize image
-    image = MiniMagick::Image.open(file_path)
+    image = MiniMagick::Image.open(medium.full_file_path)
     image.resize "#{size[:width]}x#{size[:height]}>"
     
     # Convert HEIC to JPEG for better browser compatibility

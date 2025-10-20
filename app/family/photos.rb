@@ -46,6 +46,7 @@ ActiveAdmin.register Photo, namespace: :family do
       end
     end
     column :original_filename
+    column :current_filename
     column :user
     column :uploaded_by
     column :effective_datetime do |photo|
@@ -138,6 +139,7 @@ ActiveAdmin.register Photo, namespace: :family do
       row :description
       row :original_filename
       row :file_path
+      row :current_filename
       row :content_type
       row :file_size do |photo|
         photo.file_size_human
