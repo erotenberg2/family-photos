@@ -785,6 +785,11 @@ class Medium < ApplicationRecord
 
   # Override destroy_all to include cleanup
   def self.destroy_all
+    # First destroy all associated mediable records (photos, audios, videos)
+    all.each do |medium|
+      medium.mediable&.destroy
+    end
+    
     result = super
     cleanup
     # Also destroy orphaned events that have no media
@@ -833,6 +838,9 @@ class Medium < ApplicationRecord
       end
     end
     
+    # Clean up orphaned thumbnails and previews
+    cleanup_orphaned_thumbnails_and_previews(orphaned_files)
+    
     Rails.logger.info "Found #{orphaned_files.size} orphaned files"
     
     # Delete orphaned files
@@ -858,6 +866,50 @@ class Medium < ApplicationRecord
     { deleted_count: deleted_count, empty_dirs_removed: empty_dirs_removed, errors: errors, orphaned_files: orphaned_files }
   end
 
+  # Clean up orphaned thumbnails and previews
+  def self.cleanup_orphaned_thumbnails_and_previews(orphaned_files)
+    require_relative '../../lib/constants'
+    
+    Rails.logger.info "=== CLEANING UP ORPHANED THUMBNAILS AND PREVIEWS ==="
+    
+    # Get all thumbnail and preview paths from database that are in the NEW storage locations
+    thumbnail_paths = Photo.where.not(thumbnail_path: nil)
+                          .where("thumbnail_path LIKE ?", "#{Constants::THUMBNAILS_STORAGE}%")
+                          .pluck(:thumbnail_path).compact.to_set
+    preview_paths = Photo.where.not(preview_path: nil)
+                        .where("preview_path LIKE ?", "#{Constants::PREVIEWS_STORAGE}%")
+                        .pluck(:preview_path).compact.to_set
+    
+    Rails.logger.info "Found #{thumbnail_paths.size} thumbnails and #{preview_paths.size} previews in database using NEW storage locations"
+    
+    # Check thumbnail storage (only in NEW location)
+    if Dir.exist?(Constants::THUMBNAILS_STORAGE)
+      Dir.glob(File.join(Constants::THUMBNAILS_STORAGE, '**', '*')).each do |file_path|
+        next unless File.file?(file_path)
+        
+        unless thumbnail_paths.include?(file_path)
+          orphaned_files << file_path
+          Rails.logger.debug "Found orphaned thumbnail: #{file_path}"
+        end
+      end
+    end
+    
+    # Check preview storage (only in NEW location)
+    if Dir.exist?(Constants::PREVIEWS_STORAGE)
+      Dir.glob(File.join(Constants::PREVIEWS_STORAGE, '**', '*')).each do |file_path|
+        next unless File.file?(file_path)
+        
+        unless preview_paths.include?(file_path)
+          orphaned_files << file_path
+          Rails.logger.debug "Found orphaned preview: #{file_path}"
+        end
+      end
+    end
+    
+    Rails.logger.info "Found #{orphaned_files.count { |f| f.include?('thumbs') || f.include?('previews') }} orphaned thumbnail/preview files in NEW storage locations"
+    Rails.logger.info "=== END CLEANING UP ORPHANED THUMBNAILS AND PREVIEWS ==="
+  end
+
   # Clean up empty directories in all storage locations
   def self.cleanup_empty_directories
     require_relative '../../lib/constants'
@@ -879,6 +931,15 @@ class Medium < ApplicationRecord
     # Handle events storage separately (different structure)
     if Dir.exist?(Constants::EVENTS_STORAGE)
       removed_count += remove_empty_dirs_recursive(Constants::EVENTS_STORAGE)
+    end
+    
+    # Clean up empty thumbnail and preview directories
+    if Dir.exist?(Constants::THUMBNAILS_STORAGE)
+      removed_count += remove_empty_dirs_recursive(Constants::THUMBNAILS_STORAGE)
+    end
+    
+    if Dir.exist?(Constants::PREVIEWS_STORAGE)
+      removed_count += remove_empty_dirs_recursive(Constants::PREVIEWS_STORAGE)
     end
     
     removed_count
@@ -907,7 +968,9 @@ class Medium < ApplicationRecord
       base_storage_dirs = [
         Constants::UNSORTED_STORAGE,
         Constants::DAILY_STORAGE, 
-        Constants::EVENTS_STORAGE
+        Constants::EVENTS_STORAGE,
+        Constants::THUMBNAILS_STORAGE,
+        Constants::PREVIEWS_STORAGE
       ]
       
       # Don't remove base storage directories

@@ -94,6 +94,7 @@ ActiveAdmin.register Event, namespace: :family, as: 'Events' do
             end
           end
           column :original_filename
+          column :current_filename
           column :effective_datetime do |medium|
             medium.effective_datetime&.strftime("%Y-%m-%d %H:%M") || "No date"
           end

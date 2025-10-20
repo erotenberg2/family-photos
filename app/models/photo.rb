@@ -227,21 +227,21 @@ class Photo < ApplicationRecord
   def generate_thumbnail_path
     return nil unless medium&.full_file_path
     
-    dir = File.dirname(medium.full_file_path)
+    require_relative '../../lib/constants'
     ext = File.extname(medium.full_file_path)
     base = File.basename(medium.full_file_path, ext)
     
-    File.join(dir, "thumbs", "#{base}_thumb#{ext}")
+    File.join(Constants::THUMBNAILS_STORAGE, "#{base}_thumb#{ext}")
   end
 
   def generate_preview_path
     return nil unless medium&.full_file_path
     
-    dir = File.dirname(medium.full_file_path)
+    require_relative '../../lib/constants'
     ext = File.extname(medium.full_file_path)
     base = File.basename(medium.full_file_path, ext)
     
-    File.join(dir, "previews", "#{base}_preview#{ext}")
+    File.join(Constants::PREVIEWS_STORAGE, "#{base}_preview#{ext}")
   end
 
   def has_location?
