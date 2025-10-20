@@ -74,8 +74,8 @@ class Photo < ApplicationRecord
   def datetime_intrinsic
     return nil unless exif_data.present?
     
-    # Try to get datetime from EXIF data
-    exif_datetime = exif_data[:date_time_original] || exif_data['date_time_original']
+    # Try to get datetime from EXIF data using case-insensitive search
+    exif_datetime = find_exif_value_case_insensitive(exif_data, ['date_time_original', 'DateTimeOriginal', 'DateTime'])
     
     if exif_datetime.present?
       # Parse the EXIF datetime string (usually in format "YYYY:MM:DD HH:MM:SS")
@@ -342,12 +342,13 @@ class Photo < ApplicationRecord
     
     # Extract specific fields from the complete EXIF hash for database columns
     # This allows for efficient querying while preserving all metadata
-    self.camera_make = exif_info[:make] if exif_info[:make]
-    self.camera_model = exif_info[:model] if exif_info[:model]
+    self.camera_make = find_exif_value_case_insensitive(exif_info, ['make', 'Make'])
+    self.camera_model = find_exif_value_case_insensitive(exif_info, ['model', 'Model'])
     
     # Set taken_at on the medium record
-    if exif_info[:date_time_original] && medium
-      medium.update_column(:taken_at, exif_info[:date_time_original])
+    date_time_original = find_exif_value_case_insensitive(exif_info, ['date_time_original', 'DateTimeOriginal', 'DateTime'])
+    if date_time_original && medium
+      medium.update_column(:taken_at, date_time_original)
     end
     
     # GPS coordinates are photo-specific and stay on the photo record
@@ -393,6 +394,28 @@ class Photo < ApplicationRecord
   end
 
   private
+
+  # Find EXIF value case-insensitively from a list of possible keys
+  def find_exif_value_case_insensitive(exif_hash, possible_keys)
+    return nil unless exif_hash.present?
+    
+    # Try each possible key (case-sensitive first)
+    possible_keys.each do |key|
+      value = exif_hash[key]
+      return value if value.present?
+    end
+    
+    # If no exact match, try case-insensitive search
+    exif_hash.each do |exif_key, value|
+      possible_keys.each do |possible_key|
+        if exif_key.to_s.downcase == possible_key.downcase && value.present?
+          return value
+        end
+      end
+    end
+    
+    nil
+  end
 
   # Parse HEIC GPS coordinate string format like "37/1,52/1,675/100"
   def parse_heic_gps_string(coord_string, ref)
