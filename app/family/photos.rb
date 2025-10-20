@@ -66,6 +66,18 @@ ActiveAdmin.register Photo, namespace: :family do
     column "File Size" do |photo|
       photo.file_size_human
     end
+    column "Storage", sortable: false do |photo|
+      case photo.medium.storage_class
+      when 'daily'
+        content_tag :div, "📅", style: "font-size: 18px; text-align: center;", title: "Daily storage"
+      when 'event'
+        content_tag :div, "✈️", style: "font-size: 18px; text-align: center;", title: "Event storage"
+      when 'unsorted'
+        content_tag :div, "📂", style: "font-size: 18px; text-align: center;", title: "Unsorted storage"
+      else
+        content_tag :div, "❓", style: "font-size: 18px; text-align: center;", title: "Unknown storage"
+      end
+    end
     column :camera_make
     column :camera_model
     column "Location" do |photo|
@@ -110,11 +122,11 @@ ActiveAdmin.register Photo, namespace: :family do
       if photo.preview_path && File.exist?(photo.preview_path)
         link_to image_tag("data:image/jpg;base64,#{Base64.encode64(File.read(photo.preview_path))}", 
                   style: "max-width: 400px; max-height: 400px; object-fit: contain; border: 1px solid #ddd; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); display: block; margin: 0 auto;",
-                  alt: photo.title || photo.original_filename), image_path(photo), target: "_blank"
+                  alt: photo.title || photo.original_filename), image_path(photo.medium), target: "_blank"
       elsif photo.thumbnail_path && File.exist?(photo.thumbnail_path)
         link_to image_tag("data:image/jpg;base64,#{Base64.encode64(File.read(photo.thumbnail_path))}", 
                   style: "max-width: 400px; max-height: 400px; object-fit: contain; border: 1px solid #ddd; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); display: block; margin: 0 auto;",
-                  alt: photo.title || photo.original_filename), image_path(photo), target: "_blank"
+                  alt: photo.title || photo.original_filename), image_path(photo.medium), target: "_blank"
       else
         div "Preview not available (processing pending or failed)", style: "padding: 40px; background: #f0f0f0; color: #666; border-radius: 8px; text-align: center;"
       end
@@ -156,6 +168,18 @@ ActiveAdmin.register Photo, namespace: :family do
           content_tag :div, photo.effective_datetime.strftime("%Y-%m-%d %H:%M:%S"), style: "font-weight: bold;"
         else
           content_tag :div, "No date available", style: "color: #cc0000; font-weight: bold;"
+        end
+      end
+      row "Storage Class" do |photo|
+        case photo.medium.storage_class
+        when 'daily'
+          content_tag :div, "📅 Daily Storage", style: "font-size: 16px;", title: "Stored in daily organization structure"
+        when 'event'
+          content_tag :div, "✈️ Event Storage", style: "font-size: 16px;", title: "Stored in event organization structure"
+        when 'unsorted'
+          content_tag :div, "📂 Unsorted Storage", style: "font-size: 16px;", title: "Stored in unsorted organization structure"
+        else
+          content_tag :div, "❓ Unknown Storage", style: "font-size: 16px;", title: "Unknown storage class"
         end
       end
       row :user

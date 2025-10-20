@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_10_19_203458) do
+ActiveRecord::Schema[8.0].define(version: 2025_10_19_214544) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -122,6 +122,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_19_203458) do
     t.datetime "datetime_inferred"
     t.decimal "latitude", precision: 10, scale: 7
     t.decimal "longitude", precision: 10, scale: 7
+    t.string "storage_class", default: "unsorted", null: false
     t.index ["created_at"], name: "index_media_on_created_at"
     t.index ["datetime_inferred"], name: "index_media_on_datetime_inferred"
     t.index ["datetime_intrinsic"], name: "index_media_on_datetime_intrinsic"
@@ -133,6 +134,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_19_203458) do
     t.index ["md5_hash"], name: "index_media_on_md5_hash", unique: true
     t.index ["mediable_type", "mediable_id"], name: "index_media_on_mediable"
     t.index ["medium_type"], name: "index_media_on_medium_type"
+    t.index ["storage_class"], name: "index_media_on_storage_class"
     t.index ["uploaded_by_id"], name: "index_media_on_uploaded_by_id"
     t.index ["user_id"], name: "index_media_on_user_id"
   end

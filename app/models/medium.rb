@@ -10,6 +10,13 @@ class Medium < ApplicationRecord
     video: 'video'
   }
   
+  # Enum for storage classes
+  enum :storage_class, {
+    unsorted: 'unsorted',
+    daily: 'daily',
+    event: 'event'
+  }
+  
   # Validations for generic media attributes
   validates :file_path, presence: true, uniqueness: true
   validates :md5_hash, presence: true, uniqueness: true
@@ -38,7 +45,7 @@ class Medium < ApplicationRecord
   def self.ransackable_attributes(auth_object = nil)
     ["client_file_path", "content_type", "created_at", "datetime_inferred", "datetime_intrinsic", "datetime_source_last_modified", 
      "datetime_user", "file_path", "file_size", "id", "latitude", "longitude", "md5_hash", "medium_type", "original_filename", 
-     "updated_at", "uploaded_by_id", "user_id"]
+     "storage_class", "updated_at", "uploaded_by_id", "user_id"]
   end
 
   def self.ransackable_associations(auth_object = nil)
@@ -126,6 +133,21 @@ class Medium < ApplicationRecord
   # Legacy method for backwards compatibility
   def taken_date
     effective_datetime || created_at
+  end
+
+  # Get the appropriate storage base path based on storage_class
+  def storage_base_path
+    require_relative '../../lib/constants'
+    case storage_class
+    when 'unsorted'
+      Constants::UNSORTED_STORAGE
+    when 'daily'
+      Constants::DAILY_STORAGE
+    when 'event'
+      Constants::EVENTS_STORAGE
+    else
+      Constants::UNSORTED_STORAGE
+    end
   end
 
   # Delegate methods to mediable object for convenience
@@ -225,12 +247,13 @@ class Medium < ApplicationRecord
     file_extension = File.extname(uploaded_file.original_filename)
     stored_filename = "#{timestamp}_#{random_suffix}#{file_extension}"
     
-    # Create upload directory based on medium type
-    upload_dir = Rails.root.join('storage', medium_type.pluralize)
+    # Create upload directory in unsorted storage
+    require_relative '../../lib/constants'
+    upload_dir = File.join(Constants::UNSORTED_STORAGE, medium_type.pluralize)
     FileUtils.mkdir_p(upload_dir) unless Dir.exist?(upload_dir)
     
     # Full file path
-    file_path = upload_dir.join(stored_filename).to_s
+    file_path = File.join(upload_dir, stored_filename)
     
     # Save file to disk
     save_uploaded_file_to_path(uploaded_file, file_path)
@@ -267,7 +290,8 @@ class Medium < ApplicationRecord
       upload_started_at: upload_started_at,
       upload_completed_at: upload_completed_at,
       upload_batch_id: batch_id,
-      upload_session_id: session_id
+      upload_session_id: session_id,
+      storage_class: 'unsorted'  # Default to unsorted storage
     )
     
     if medium.save
@@ -525,22 +549,23 @@ class Medium < ApplicationRecord
     Rails.logger.info "Found #{db_file_paths.size} files in database"
     
     # Get all files in storage directories
-    storage_base = Rails.root.join('storage')
+    require_relative '../../lib/constants'
     orphaned_files = []
     
-    # Check each medium type directory
-    %w[photos videos audios].each do |medium_type|
-      storage_dir = storage_base.join(medium_type)
-      next unless Dir.exist?(storage_dir)
+    # Check each storage directory
+    [Constants::UNSORTED_STORAGE, Constants::DAILY_STORAGE, Constants::EVENTS_STORAGE].each do |storage_base|
+      next unless Dir.exist?(storage_base)
       
-      Dir.glob(storage_dir.join('**', '*')).each do |file_path|
-        next unless File.file?(file_path)
+      %w[photos videos audios].each do |medium_type|
+        storage_dir = File.join(storage_base, medium_type)
+        next unless Dir.exist?(storage_dir)
         
-        # Convert to string for comparison
-        file_path_str = file_path.to_s
-        
-        unless db_file_paths.include?(file_path_str)
-          orphaned_files << file_path_str
+        Dir.glob(File.join(storage_dir, '**', '*')).each do |file_path|
+          next unless File.file?(file_path)
+          
+          unless db_file_paths.include?(file_path)
+            orphaned_files << file_path
+          end
         end
       end
     end
@@ -563,8 +588,62 @@ class Medium < ApplicationRecord
       end
     end
     
-    Rails.logger.info "Cleanup completed. Deleted: #{deleted_count}, Errors: #{errors.length}"
-    { deleted_count: deleted_count, errors: errors, orphaned_files: orphaned_files }
+    # Clean up empty directories
+    empty_dirs_removed = cleanup_empty_directories
+    
+    Rails.logger.info "Cleanup completed. Deleted: #{deleted_count} files, Removed: #{empty_dirs_removed} empty directories, Errors: #{errors.length}"
+    { deleted_count: deleted_count, empty_dirs_removed: empty_dirs_removed, errors: errors, orphaned_files: orphaned_files }
+  end
+
+  # Clean up empty directories in all storage locations
+  def self.cleanup_empty_directories
+    require_relative '../../lib/constants'
+    removed_count = 0
+    
+    # Check each storage directory
+    [Constants::UNSORTED_STORAGE, Constants::DAILY_STORAGE, Constants::EVENTS_STORAGE].each do |storage_base|
+      next unless Dir.exist?(storage_base)
+      
+      %w[photos videos audios].each do |medium_type|
+        storage_dir = File.join(storage_base, medium_type)
+        next unless Dir.exist?(storage_dir)
+        
+        # Recursively find and remove empty directories
+        removed_count += remove_empty_dirs_recursive(storage_dir)
+      end
+    end
+    
+    removed_count
+  end
+
+  # Recursively remove empty directories
+  def self.remove_empty_dirs_recursive(dir_path)
+    removed_count = 0
+    
+    # First, recursively clean subdirectories
+    if Dir.exist?(dir_path)
+      Dir.entries(dir_path).each do |entry|
+        next if entry == '.' || entry == '..'
+        
+        subdir = File.join(dir_path, entry)
+        if Dir.exist?(subdir)
+          removed_count += remove_empty_dirs_recursive(subdir)
+        end
+      end
+    end
+    
+    # Then check if this directory is now empty and remove it
+    if Dir.exist?(dir_path) && Dir.empty?(dir_path)
+      begin
+        Dir.rmdir(dir_path)
+        removed_count += 1
+        Rails.logger.debug "Removed empty directory: #{dir_path}"
+      rescue => e
+        Rails.logger.debug "Could not remove directory #{dir_path}: #{e.message}"
+      end
+    end
+    
+    removed_count
   end
 
   private

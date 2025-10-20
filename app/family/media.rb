@@ -10,7 +10,7 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
 
   # Permitted parameters
   permit_params :file_path, :file_size, :original_filename, :content_type, :md5_hash,
-                :datetime_user, :datetime_intrinsic, :datetime_inferred, :medium_type, :uploaded_by_id, :user_id
+                :datetime_user, :datetime_intrinsic, :datetime_inferred, :medium_type, :storage_class, :uploaded_by_id, :user_id
 
   # Index page configuration
   index do
@@ -94,6 +94,18 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
       medium.file_size_human
     end
     column :content_type
+    column "Storage", sortable: :storage_class do |medium|
+      case medium.storage_class
+      when 'daily'
+        content_tag :div, "📅", style: "font-size: 18px; text-align: center;", title: "Daily storage"
+      when 'event'
+        content_tag :div, "✈️", style: "font-size: 18px; text-align: center;", title: "Event storage"
+      when 'unsorted'
+        content_tag :div, "📂", style: "font-size: 18px; text-align: center;", title: "Unsorted storage"
+      else
+        content_tag :div, "❓", style: "font-size: 18px; text-align: center;", title: "Unknown storage"
+      end
+    end
     column :created_at
     
     actions
@@ -108,7 +120,43 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
   filter :datetime_user
   filter :datetime_intrinsic
   filter :datetime_inferred
+  filter :storage_class, as: :select, collection: Medium.storage_classes.keys.map { |k| [k.humanize, k] }
   filter :created_at
+
+  # Batch actions
+  batch_action :destroy, confirm: "Are you sure you want to delete the selected media files?" do |ids|
+    deleted_count = 0
+    errors = []
+    
+    ids.each do |id|
+      begin
+        medium = Medium.find(id)
+        medium.destroy
+        deleted_count += 1
+      rescue => e
+        errors << "Failed to delete Medium #{id}: #{e.message}"
+      end
+    end
+    
+    if errors.empty?
+      redirect_to collection_path, notice: "Successfully deleted #{deleted_count} media files."
+    else
+      redirect_to collection_path, alert: "Deleted #{deleted_count} files, but encountered #{errors.length} errors: #{errors.join(', ')}"
+    end
+  end
+
+  batch_action :move_to_daily, confirm: "Move selected media files to daily storage (organized by date)?" do |ids|
+    results = FileOrganizationService.move_to_daily_storage(ids)
+    
+    if results[:error_count] == 0
+      redirect_to collection_path, notice: "Successfully moved #{results[:success_count]} files to daily storage."
+    elsif results[:success_count] > 0
+      redirect_to collection_path, 
+                  alert: "Moved #{results[:success_count]} files, but encountered #{results[:error_count]} errors: #{results[:errors].join(', ')}"
+    else
+      redirect_to collection_path, alert: "Failed to move files: #{results[:errors].join(', ')}"
+    end
+  end
 
   # Show page configuration
   show do
@@ -201,6 +249,18 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
         end
       end
       row :datetime_source_last_modified
+      row "Storage Class" do |medium|
+        case medium.storage_class
+        when 'daily'
+          content_tag :div, "📅 Daily Storage", style: "font-size: 16px;", title: "Stored in daily organization structure"
+        when 'event'
+          content_tag :div, "✈️ Event Storage", style: "font-size: 16px;", title: "Stored in event organization structure"
+        when 'unsorted'
+          content_tag :div, "📂 Unsorted Storage", style: "font-size: 16px;", title: "Stored in unsorted organization structure"
+        else
+          content_tag :div, "❓ Unknown Storage", style: "font-size: 16px;", title: "Unknown storage class"
+        end
+      end
       row :user
       row :uploaded_by
       row :md5_hash
