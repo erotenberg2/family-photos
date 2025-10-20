@@ -1,0 +1,149 @@
+<% content_for :title, "Create New Event" %>
+
+<div class="new-event-form">
+  <h2>Create New Event</h2>
+  
+  <div class="event-info">
+    <p><strong>Selected Media:</strong> <%= @selected_ids.length %> files</p>
+    <p><strong>Date Range:</strong> <%= @earliest_date.strftime('%Y-%m-%d') %> to <%= @latest_date.strftime('%Y-%m-%d') %></p>
+  </div>
+  
+  <% if @errors&.any? %>
+    <div class="alert alert-danger">
+      <h4>Please fix the following errors:</h4>
+      <ul>
+        <% @errors.each do |error| %>
+          <li><%= error %></li>
+        <% end %>
+      </ul>
+    </div>
+  <% end %>
+  
+  <%= form_with url: create_event_from_media_family_media_path, method: :post, local: true, class: "event-form" do |form| %>
+    <div class="form-group">
+      <%= form.label :event_title, "Event Name:", class: "form-label" %>
+      <%= form.text_field :event_title, 
+                          value: @suggested_name,
+                          class: "form-control",
+                          placeholder: "Enter a unique name for this event",
+                          required: true %>
+      <small class="form-text text-muted">
+        This name will be used to identify your event. It must be unique.
+      </small>
+    </div>
+    
+    <div class="form-actions">
+      <%= form.submit "Create Event", class: "btn btn-primary" %>
+      <%= link_to "Cancel", family_media_path, class: "btn btn-secondary", 
+                  onclick: "sessionStorage.removeItem('selected_media_ids');" %>
+    </div>
+  <% end %>
+</div>
+
+<style>
+  .new-event-form {
+    max-width: 600px;
+    margin: 20px auto;
+    padding: 20px;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+  }
+  
+  .event-info {
+    background: #f8f9fa;
+    padding: 15px;
+    border-radius: 5px;
+    margin-bottom: 20px;
+  }
+  
+  .event-info p {
+    margin: 5px 0;
+  }
+  
+  .form-group {
+    margin-bottom: 20px;
+  }
+  
+  .form-label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: bold;
+  }
+  
+  .form-control {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 16px;
+  }
+  
+  .form-control:focus {
+    border-color: #007bff;
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(0,123,255,0.25);
+  }
+  
+  .form-text {
+    font-size: 14px;
+    color: #6c757d;
+    margin-top: 5px;
+  }
+  
+  .form-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 20px;
+  }
+  
+  .btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-block;
+    font-size: 16px;
+  }
+  
+  .btn-primary {
+    background-color: #007bff;
+    color: white;
+  }
+  
+  .btn-primary:hover {
+    background-color: #0056b3;
+  }
+  
+  .btn-secondary {
+    background-color: #6c757d;
+    color: white;
+  }
+  
+  .btn-secondary:hover {
+    background-color: #545b62;
+  }
+  
+  .alert {
+    padding: 15px;
+    margin-bottom: 20px;
+    border: 1px solid transparent;
+    border-radius: 4px;
+  }
+  
+  .alert-danger {
+    color: #721c24;
+    background-color: #f8d7da;
+    border-color: #f5c6cb;
+  }
+  
+  .alert h4 {
+    margin-top: 0;
+    margin-bottom: 10px;
+  }
+  
+  .alert ul {
+    margin-bottom: 0;
+  }
+</style>

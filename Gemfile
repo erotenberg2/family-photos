@@ -54,6 +54,8 @@ gem 'awesome_print'
 gem 'sidekiq'
 gem 'redis'
 
+gem 'byebug'
+
 # Process management
 gem 'foreman'
 group :development, :test do

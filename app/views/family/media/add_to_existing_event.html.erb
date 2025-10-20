@@ -1,0 +1,144 @@
+<% content_for :title, "Add to Existing Event" %>
+
+<div class="add-to-event-form">
+  <h2>Add Media to Existing Event</h2>
+  
+  <div class="media-info">
+    <p><strong>Selected Media:</strong> <%= @selected_ids.length %> files</p>
+    <p><strong>Date Range:</strong> <%= @earliest_date.strftime('%Y-%m-%d') %> to <%= @latest_date.strftime('%Y-%m-%d') %></p>
+  </div>
+  
+  <% if @existing_events.empty? %>
+    <div class="alert alert-info">
+      <h4>No Events Available</h4>
+      <p>There are no existing events to add media to. Please create a new event first.</p>
+      <%= link_to "Create New Event", new_event_from_media_family_media_path, class: "btn btn-primary" %>
+    </div>
+  <% else %>
+    <%= form_with url: move_to_existing_event_family_media_path, method: :post, local: true, class: "event-form" do |form| %>
+      <div class="form-group">
+        <%= form.label :event_id, "Select Event:", class: "form-label" %>
+        <%= form.select :event_id, 
+                        options_from_collection_for_select(@existing_events, :id, :title_with_date_range),
+                        { prompt: "Choose an event..." },
+                        { class: "form-control", required: true } %>
+        <small class="form-text text-muted">
+          Select the event you want to add these media files to.
+        </small>
+      </div>
+      
+      <div class="form-actions">
+        <%= form.submit "Add to Event", class: "btn btn-primary" %>
+        <%= link_to "Cancel", family_media_path, class: "btn btn-secondary" %>
+      </div>
+    <% end %>
+  <% end %>
+</div>
+
+<style>
+  .add-to-event-form {
+    max-width: 600px;
+    margin: 20px auto;
+    padding: 20px;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+  }
+  
+  .media-info {
+    background: #f8f9fa;
+    padding: 15px;
+    border-radius: 5px;
+    margin-bottom: 20px;
+  }
+  
+  .media-info p {
+    margin: 5px 0;
+  }
+  
+  .form-group {
+    margin-bottom: 20px;
+  }
+  
+  .form-label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: bold;
+  }
+  
+  .form-control {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 16px;
+  }
+  
+  .form-control:focus {
+    border-color: #007bff;
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(0,123,255,0.25);
+  }
+  
+  .form-text {
+    font-size: 14px;
+    color: #6c757d;
+    margin-top: 5px;
+  }
+  
+  .form-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 20px;
+  }
+  
+  .btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-block;
+    font-size: 16px;
+  }
+  
+  .btn-primary {
+    background-color: #007bff;
+    color: white;
+  }
+  
+  .btn-primary:hover {
+    background-color: #0056b3;
+  }
+  
+  .btn-secondary {
+    background-color: #6c757d;
+    color: white;
+  }
+  
+  .btn-secondary:hover {
+    background-color: #545b62;
+  }
+  
+  .alert {
+    padding: 15px;
+    margin-bottom: 20px;
+    border: 1px solid transparent;
+    border-radius: 4px;
+  }
+  
+  .alert-info {
+    color: #0c5460;
+    background-color: #d1ecf1;
+    border-color: #bee5eb;
+  }
+  
+  .alert h4 {
+    margin-top: 0;
+    margin-bottom: 10px;
+  }
+  
+  .alert p {
+    margin-bottom: 15px;
+  }
+</style>

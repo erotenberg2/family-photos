@@ -99,4 +99,142 @@ class FileOrganizationService
       end
     end
   end
+  
+  # Move media to event storage
+  def self.move_to_event_storage(media_ids, event_id)
+    results = { success_count: 0, error_count: 0, errors: [] }
+    
+    event = Event.find(event_id)
+    media = Medium.where(id: media_ids)
+    
+    # Create event directory
+    event_dir = File.join(Constants::EVENTS_STORAGE, event.folder_name)
+    FileUtils.mkdir_p(event_dir) unless Dir.exist?(event_dir)
+    
+    media.each do |medium|
+      begin
+        if medium.has_valid_datetime?
+          # Create subdirectories by medium type
+          type_dir = File.join(event_dir, medium.medium_type.pluralize)
+          FileUtils.mkdir_p(type_dir) unless Dir.exist?(type_dir)
+          
+          # Generate new filename (YYYYMMDD_HHMMSS_originalfilename.ext)
+          date = medium.effective_datetime
+          timestamp = date.strftime("%Y%m%d_%H%M%S")
+          base_name = File.basename(medium.original_filename, '.*')
+          extension = File.extname(medium.original_filename)
+          new_filename = "#{timestamp}_#{base_name}#{extension}"
+          new_path = File.join(type_dir, new_filename)
+          
+          # Move the file
+          if File.exist?(medium.file_path)
+            if medium.file_path == new_path
+              # File is already in the correct location, just update the database
+              medium.update!(storage_class: 'event', event_id: event_id)
+              results[:success_count] += 1
+              Rails.logger.info "File #{medium.original_filename} already in correct location, updated database record"
+            else
+              # File needs to be moved
+              FileUtils.mv(medium.file_path, new_path)
+              
+              # Update the database record
+              medium.update!(file_path: new_path, storage_class: 'event', event_id: event_id)
+              
+              results[:success_count] += 1
+              Rails.logger.info "Moved #{medium.original_filename} to event storage: #{new_path}"
+            end
+          else
+            results[:errors] << "File not found for Medium #{medium.id}: #{medium.file_path}"
+            results[:error_count] += 1
+          end
+        else
+          results[:errors] << "Medium #{medium.original_filename} (ID: #{medium.id}) has no valid datetime for event storage."
+          results[:error_count] += 1
+        end
+      rescue => e
+        results[:errors] << "Failed to move #{medium.original_filename}: #{e.message}"
+        results[:error_count] += 1
+      end
+    end
+    
+    # Clean up empty source directories
+    media.each do |medium|
+      cleanup_empty_source_directories(medium.file_path_before_last_save) if medium.previous_changes.key?('file_path')
+    end
+    
+    # Update event date range based on new media
+    event.update_date_range_from_media!
+    
+    results
+  end
+  
+  # Move media to subevent storage
+  def self.move_to_subevent_storage(media_ids, subevent_id)
+    results = { success_count: 0, error_count: 0, errors: [] }
+    
+    subevent = Subevent.find(subevent_id)
+    event = subevent.event
+    media = Medium.where(id: media_ids)
+    
+    # Create subevent directory within event directory
+    event_dir = File.join(Constants::EVENTS_STORAGE, event.folder_name)
+    subevent_dir = File.join(event_dir, subevent.footer_name)
+    FileUtils.mkdir_p(subevent_dir) unless Dir.exist?(subevent_dir)
+    
+    media.each do |medium|
+      begin
+        if medium.has_valid_datetime?
+          # Create subdirectories by medium type
+          type_dir = File.join(subevent_dir, medium.medium_type.pluralize)
+          FileUtils.mkdir_p(type_dir) unless Dir.exist?(type_dir)
+          
+          # Generate new filename (YYYYMMDD_HHMMSS_originalfilename.ext)
+          date = medium.effective_datetime
+          timestamp = date.strftime("%Y%m%d_%H%M%S")
+          base_name = File.basename(medium.original_filename, '.*')
+          extension = File.extname(medium.original_filename)
+          new_filename = "#{timestamp}_#{base_name}#{extension}"
+          new_path = File.join(type_dir, new_filename)
+          
+          # Move the file
+          if File.exist?(medium.file_path)
+            if medium.file_path == new_path
+              # File is already in the correct location, just update the database
+              medium.update!(storage_class: 'event', event_id: event.id, subevent_id: subevent_id)
+              results[:success_count] += 1
+              Rails.logger.info "File #{medium.original_filename} already in correct location, updated database record"
+            else
+              # File needs to be moved
+              FileUtils.mv(medium.file_path, new_path)
+              
+              # Update the database record
+              medium.update!(file_path: new_path, storage_class: 'event', event_id: event.id, subevent_id: subevent_id)
+              
+              results[:success_count] += 1
+              Rails.logger.info "Moved #{medium.original_filename} to subevent storage: #{new_path}"
+            end
+          else
+            results[:errors] << "File not found for Medium #{medium.id}: #{medium.file_path}"
+            results[:error_count] += 1
+          end
+        else
+          results[:errors] << "Medium #{medium.original_filename} (ID: #{medium.id}) has no valid datetime for subevent storage."
+          results[:error_count] += 1
+        end
+      rescue => e
+        results[:errors] << "Failed to move #{medium.original_filename}: #{e.message}"
+        results[:error_count] += 1
+      end
+    end
+    
+    # Clean up empty source directories
+    media.each do |medium|
+      cleanup_empty_source_directories(medium.file_path_before_last_save) if medium.previous_changes.key?('file_path')
+    end
+    
+    # Update event date range based on new media
+    event.update_date_range_from_media!
+    
+    results
+  end
 end

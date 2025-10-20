@@ -2,6 +2,8 @@ class Medium < ApplicationRecord
   belongs_to :mediable, polymorphic: true
   belongs_to :uploaded_by, class_name: 'User'
   belongs_to :user
+  belongs_to :event, optional: true
+  belongs_to :subevent, optional: true
   
   # Enum for medium types
   enum :medium_type, {
@@ -44,18 +46,21 @@ class Medium < ApplicationRecord
 
   def self.ransackable_attributes(auth_object = nil)
     ["client_file_path", "content_type", "created_at", "datetime_inferred", "datetime_intrinsic", "datetime_source_last_modified", 
-     "datetime_user", "file_path", "file_size", "id", "latitude", "longitude", "md5_hash", "medium_type", "original_filename", 
-     "storage_class", "updated_at", "uploaded_by_id", "user_id"]
+     "datetime_user", "event_id", "file_path", "file_size", "id", "latitude", "longitude", "md5_hash", "medium_type", "original_filename", 
+     "storage_class", "subevent_id", "updated_at", "uploaded_by_id", "user_id"]
   end
 
   def self.ransackable_associations(auth_object = nil)
-    ["mediable", "uploaded_by", "user"]
+    ["event", "mediable", "subevent", "uploaded_by", "user"]
   end
 
   # Scopes
   scope :by_date, -> { order(:datetime_user, :datetime_intrinsic, :datetime_inferred, :created_at) }
   scope :recent, -> { order(created_at: :desc) }
   scope :by_type, ->(type) { where(medium_type: type) }
+  scope :with_event, -> { where.not(event_id: nil) }
+  scope :without_event, -> { where(event_id: nil) }
+  scope :by_event, ->(event_id) { where(event_id: event_id) }
   scope :photos, -> { where(medium_type: 'photo') }
   scope :audio, -> { where(medium_type: 'audio') }
   scope :video, -> { where(medium_type: 'video') }
@@ -537,6 +542,8 @@ class Medium < ApplicationRecord
   def self.destroy_all
     result = super
     cleanup
+    # Also destroy orphaned events that have no media
+    Event.where.not(id: Medium.select(:event_id).where.not(event_id: nil)).destroy_all
     result
   end
 
@@ -553,7 +560,7 @@ class Medium < ApplicationRecord
     orphaned_files = []
     
     # Check each storage directory
-    [Constants::UNSORTED_STORAGE, Constants::DAILY_STORAGE, Constants::EVENTS_STORAGE].each do |storage_base|
+    [Constants::UNSORTED_STORAGE, Constants::DAILY_STORAGE].each do |storage_base|
       next unless Dir.exist?(storage_base)
       
       %w[photos videos audios].each do |medium_type|
@@ -566,6 +573,17 @@ class Medium < ApplicationRecord
           unless db_file_paths.include?(file_path)
             orphaned_files << file_path
           end
+        end
+      end
+    end
+    
+    # Handle events storage separately (different structure)
+    if Dir.exist?(Constants::EVENTS_STORAGE)
+      Dir.glob(File.join(Constants::EVENTS_STORAGE, '**', '*')).each do |file_path|
+        next unless File.file?(file_path)
+        
+        unless db_file_paths.include?(file_path)
+          orphaned_files << file_path
         end
       end
     end
@@ -600,8 +618,8 @@ class Medium < ApplicationRecord
     require_relative '../../lib/constants'
     removed_count = 0
     
-    # Check each storage directory
-    [Constants::UNSORTED_STORAGE, Constants::DAILY_STORAGE, Constants::EVENTS_STORAGE].each do |storage_base|
+    # Check unsorted and daily storage directories
+    [Constants::UNSORTED_STORAGE, Constants::DAILY_STORAGE].each do |storage_base|
       next unless Dir.exist?(storage_base)
       
       %w[photos videos audios].each do |medium_type|
@@ -611,6 +629,11 @@ class Medium < ApplicationRecord
         # Recursively find and remove empty directories
         removed_count += remove_empty_dirs_recursive(storage_dir)
       end
+    end
+    
+    # Handle events storage separately (different structure)
+    if Dir.exist?(Constants::EVENTS_STORAGE)
+      removed_count += remove_empty_dirs_recursive(Constants::EVENTS_STORAGE)
     end
     
     removed_count
@@ -633,13 +656,24 @@ class Medium < ApplicationRecord
     end
     
     # Then check if this directory is now empty and remove it
+    # But don't remove the base storage directories
     if Dir.exist?(dir_path) && Dir.empty?(dir_path)
-      begin
-        Dir.rmdir(dir_path)
-        removed_count += 1
-        Rails.logger.debug "Removed empty directory: #{dir_path}"
-      rescue => e
-        Rails.logger.debug "Could not remove directory #{dir_path}: #{e.message}"
+      require_relative '../../lib/constants'
+      base_storage_dirs = [
+        Constants::UNSORTED_STORAGE,
+        Constants::DAILY_STORAGE, 
+        Constants::EVENTS_STORAGE
+      ]
+      
+      # Don't remove base storage directories
+      unless base_storage_dirs.include?(dir_path)
+        begin
+          Dir.rmdir(dir_path)
+          removed_count += 1
+          Rails.logger.debug "Removed empty directory: #{dir_path}"
+        rescue => e
+          Rails.logger.debug "Could not remove directory #{dir_path}: #{e.message}"
+        end
       end
     end
     

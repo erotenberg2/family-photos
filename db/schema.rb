@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_10_19_214544) do
+ActiveRecord::Schema[8.0].define(version: 2025_10_20_061909) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -96,6 +96,18 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_19_214544) do
     t.datetime "updated_at", null: false
   end
 
+  create_table "events", force: :cascade do |t|
+    t.string "title"
+    t.date "start_date"
+    t.date "end_date"
+    t.text "description"
+    t.bigint "created_by_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.string "folder_path"
+    t.index ["created_by_id"], name: "index_events_on_created_by_id"
+  end
+
   create_table "media", force: :cascade do |t|
     t.string "file_path", null: false
     t.integer "file_size"
@@ -123,11 +135,14 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_19_214544) do
     t.decimal "latitude", precision: 10, scale: 7
     t.decimal "longitude", precision: 10, scale: 7
     t.string "storage_class", default: "unsorted", null: false
+    t.bigint "event_id"
+    t.bigint "subevent_id"
     t.index ["created_at"], name: "index_media_on_created_at"
     t.index ["datetime_inferred"], name: "index_media_on_datetime_inferred"
     t.index ["datetime_intrinsic"], name: "index_media_on_datetime_intrinsic"
     t.index ["datetime_source_last_modified"], name: "index_media_on_datetime_source_last_modified"
     t.index ["datetime_user"], name: "index_media_on_datetime_user"
+    t.index ["event_id"], name: "index_media_on_event_id"
     t.index ["file_path"], name: "index_media_on_file_path", unique: true
     t.index ["latitude"], name: "index_media_on_latitude"
     t.index ["longitude"], name: "index_media_on_longitude"
@@ -135,6 +150,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_19_214544) do
     t.index ["mediable_type", "mediable_id"], name: "index_media_on_mediable"
     t.index ["medium_type"], name: "index_media_on_medium_type"
     t.index ["storage_class"], name: "index_media_on_storage_class"
+    t.index ["subevent_id"], name: "index_media_on_subevent_id"
     t.index ["uploaded_by_id"], name: "index_media_on_uploaded_by_id"
     t.index ["user_id"], name: "index_media_on_user_id"
   end
@@ -171,6 +187,18 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_19_214544) do
     t.integer "height"
     t.index ["height"], name: "index_photos_on_height"
     t.index ["width"], name: "index_photos_on_width"
+  end
+
+  create_table "subevents", force: :cascade do |t|
+    t.string "title"
+    t.text "description"
+    t.bigint "event_id", null: false
+    t.bigint "parent_subevent_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.string "folder_path"
+    t.index ["event_id"], name: "index_subevents_on_event_id"
+    t.index ["parent_subevent_id"], name: "index_subevents_on_parent_subevent_id"
   end
 
   create_table "upload_logs", force: :cascade do |t|
@@ -219,9 +247,14 @@ ActiveRecord::Schema[8.0].define(version: 2025_10_19_214544) do
   add_foreign_key "albums", "photos", column: "cover_photo_id"
   add_foreign_key "albums", "users"
   add_foreign_key "albums", "users", column: "created_by_id"
+  add_foreign_key "events", "users", column: "created_by_id"
+  add_foreign_key "media", "events"
+  add_foreign_key "media", "subevents"
   add_foreign_key "media", "users"
   add_foreign_key "media", "users", column: "uploaded_by_id"
   add_foreign_key "photo_albums", "albums"
   add_foreign_key "photo_albums", "photos"
+  add_foreign_key "subevents", "events"
+  add_foreign_key "subevents", "subevents", column: "parent_subevent_id"
   add_foreign_key "upload_logs", "users"
 end

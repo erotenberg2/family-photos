@@ -182,6 +182,20 @@ ActiveAdmin.register Photo, namespace: :family do
           content_tag :div, "❓ Unknown Storage", style: "font-size: 16px;", title: "Unknown storage class"
         end
       end
+      row "Event" do |photo|
+        if photo.medium.event
+          link_to photo.medium.event.title, admin_event_path(photo.medium.event), style: "font-weight: bold;"
+        else
+          content_tag :div, "Not in an event", style: "color: #999;"
+        end
+      end
+      row "Subevent" do |photo|
+        if photo.medium.subevent
+          link_to photo.medium.subevent.hierarchy_path, admin_subevent_path(photo.medium.subevent), style: "font-weight: bold;"
+        else
+          content_tag :div, "Not in a subevent", style: "color: #999;"
+        end
+      end
       row :user
       row :uploaded_by
       row :camera_make

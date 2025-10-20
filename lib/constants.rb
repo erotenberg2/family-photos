@@ -6,4 +6,7 @@ module Constants
   UNSORTED_STORAGE = File.join(ROOT_MEDIA_STORAGE, "unsorted")
   DAILY_STORAGE = File.join(ROOT_MEDIA_STORAGE, "daily")
   EVENTS_STORAGE = File.join(ROOT_MEDIA_STORAGE, "events")
+  
+  # Event hierarchy depth limit
+  EVENT_RECURSION_DEPTH = 3
 end

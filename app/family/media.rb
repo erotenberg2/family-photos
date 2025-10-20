@@ -158,6 +158,212 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
     end
   end
 
+  batch_action :group_to_new_event do |ids|
+    # Store the selected media IDs in the session for the form
+    session[:selected_media_ids] = ids
+    
+    # Get date range from selected media for display
+    media = Medium.where(id: ids)
+    dates = media.map(&:effective_datetime).compact
+    
+    if dates.empty?
+      redirect_to collection_path, alert: "No media with valid dates selected. Cannot create event without date information."
+      return
+    end
+    
+    earliest_date = dates.min.to_date
+    latest_date = dates.max.to_date
+    
+    # Redirect to the form page
+    redirect_to new_event_from_media_family_media_path, 
+                notice: "Please provide a name for the new event (Date range: #{earliest_date.strftime('%Y-%m-%d')} to #{latest_date.strftime('%Y-%m-%d')})"
+  end
+
+  batch_action :add_to_existing_event do |ids|
+    # Store the selected media IDs in the session for the form
+    session[:selected_media_ids_for_existing] = ids
+    
+    # Get date range from selected media for display
+    media = Medium.where(id: ids)
+    dates = media.map(&:effective_datetime).compact
+    
+    Rails.logger.info "=== DEBUGGING ADD TO EXISTING EVENT DATE RANGE ==="
+    Rails.logger.info "Selected media count: #{media.count}"
+    Rails.logger.info "Media with effective_datetime: #{dates.count}"
+    
+    media.each_with_index do |medium, index|
+      Rails.logger.info "Medium #{index + 1} (ID: #{medium.id}):"
+      Rails.logger.info "  - datetime_user: #{medium.datetime_user}"
+      Rails.logger.info "  - datetime_intrinsic: #{medium.datetime_intrinsic}"
+      Rails.logger.info "  - datetime_inferred: #{medium.datetime_inferred}"
+      Rails.logger.info "  - effective_datetime: #{medium.effective_datetime}"
+      Rails.logger.info "  - datetime_source: #{medium.datetime_source}"
+    end
+    
+    if dates.empty?
+      redirect_to collection_path, alert: "No media with valid dates selected. Cannot add to event without date information."
+      return
+    end
+    
+    earliest_date = dates.min.to_date
+    latest_date = dates.max.to_date
+    
+    Rails.logger.info "Date range calculation:"
+    Rails.logger.info "  - Earliest date: #{earliest_date}"
+    Rails.logger.info "  - Latest date: #{latest_date}"
+    Rails.logger.info "=== END DEBUGGING ADD TO EXISTING EVENT DATE RANGE ==="
+    
+    # Redirect to the form page
+    redirect_to add_to_existing_event_family_media_path, 
+                notice: "Please select an existing event to add the media to (Date range: #{earliest_date.strftime('%Y-%m-%d')} to #{latest_date.strftime('%Y-%m-%d')})"
+  end
+
+  # Custom actions
+  collection_action :new_event_from_media, method: :get do
+    @selected_ids = session[:selected_media_ids] || []
+    @media = Medium.where(id: @selected_ids)
+    @dates = @media.map(&:effective_datetime).compact
+    
+    if @dates.empty?
+      redirect_to collection_path, alert: "No media with valid dates selected. Cannot create event without date information."
+      return
+    end
+    
+    @earliest_date = @dates.min.to_date
+    @latest_date = @dates.max.to_date
+    @suggested_name = "Event #{@earliest_date.strftime('%Y-%m-%d')}"
+    if @earliest_date != @latest_date
+      @suggested_name += " to #{@latest_date.strftime('%Y-%m-%d')}"
+    end
+  end
+  
+  collection_action :create_event_from_media, method: :post do
+    selected_ids = session[:selected_media_ids] || []
+    
+    if selected_ids.empty?
+      redirect_to collection_path, alert: "No media selected for event creation."
+      return
+    end
+    
+    # Get date range from selected media
+    media = Medium.where(id: selected_ids)
+    dates = media.map(&:effective_datetime).compact
+    
+    Rails.logger.info "=== DEBUGGING EVENT DATE RANGE ==="
+    Rails.logger.info "Selected media count: #{media.count}"
+    Rails.logger.info "Media with effective_datetime: #{dates.count}"
+    
+    media.each_with_index do |medium, index|
+      Rails.logger.info "Medium #{index + 1} (ID: #{medium.id}):"
+      Rails.logger.info "  - datetime_user: #{medium.datetime_user}"
+      Rails.logger.info "  - datetime_intrinsic: #{medium.datetime_intrinsic}"
+      Rails.logger.info "  - datetime_inferred: #{medium.datetime_inferred}"
+      Rails.logger.info "  - effective_datetime: #{medium.effective_datetime}"
+      Rails.logger.info "  - datetime_source: #{medium.datetime_source}"
+    end
+    
+    if dates.empty?
+      redirect_to collection_path, alert: "No media with valid dates selected. Cannot create event without date information."
+      return
+    end
+    
+    earliest_date = dates.min.to_date
+    latest_date = dates.max.to_date
+    
+    Rails.logger.info "Date range calculation:"
+    Rails.logger.info "  - Earliest date: #{earliest_date}"
+    Rails.logger.info "  - Latest date: #{latest_date}"
+    Rails.logger.info "=== END DEBUGGING EVENT DATE RANGE ==="
+    
+    # Create event with user-provided name
+    event_params = {
+      title: params[:event_title],
+      start_date: earliest_date,
+      end_date: latest_date,
+      description: "Created from #{selected_ids.length} media files",
+      created_by: current_user
+    }
+    
+    event = Event.new(event_params)
+    
+    if event.save
+      # Clear the session
+      session[:selected_media_ids] = nil
+      
+      results = FileOrganizationService.move_to_event_storage(selected_ids, event.id)
+      
+      if results[:error_count] == 0
+        redirect_to family_event_path(event), notice: "Successfully created event '#{event.title}' and moved #{results[:success_count]} files."
+      elsif results[:success_count] > 0
+        redirect_to family_event_path(event), 
+                    alert: "Created event '#{event.title}' and moved #{results[:success_count]} files, but encountered #{results[:error_count]} errors: #{results[:errors].join(', ')}"
+      else
+        redirect_to collection_path, alert: "Failed to create event and move files: #{results[:errors].join(', ')}"
+      end
+    else
+      # Show validation errors and let user try again
+      @selected_ids = selected_ids
+      @media = media
+      @dates = dates
+      @earliest_date = earliest_date
+      @latest_date = latest_date
+      @suggested_name = params[:event_title]
+      @errors = event.errors.full_messages
+      
+      render :new_event_from_media
+    end
+  end
+  
+  collection_action :add_to_existing_event, method: :get do
+    @selected_ids = session[:selected_media_ids_for_existing] || []
+    @media = Medium.where(id: @selected_ids)
+    @dates = @media.map(&:effective_datetime).compact
+    
+    if @dates.empty?
+      redirect_to collection_path, alert: "No media with valid dates selected. Cannot add to event without date information."
+      return
+    end
+    
+    @earliest_date = @dates.min.to_date
+    @latest_date = @dates.max.to_date
+    @existing_events = Event.order(:title)
+  end
+  
+  collection_action :move_to_existing_event, method: :post do
+    selected_ids = session[:selected_media_ids_for_existing] || []
+    event_id = params[:event_id]
+    
+    if selected_ids.empty?
+      redirect_to collection_path, alert: "No media selected for event addition."
+      return
+    end
+    
+    if event_id.blank?
+      redirect_to add_to_existing_event_family_media_path, alert: "Please select an event."
+      return
+    end
+    
+    begin
+      event = Event.find(event_id)
+      
+      results = FileOrganizationService.move_to_event_storage(selected_ids, event.id)
+      
+      # Clear the session
+      session[:selected_media_ids_for_existing] = nil
+      
+      if results[:error_count] == 0
+        redirect_to family_event_path(event), notice: "Successfully added #{results[:success_count]} files to event '#{event.title}'."
+      elsif results[:success_count] > 0
+        redirect_to family_event_path(event), 
+                    alert: "Added #{results[:success_count]} files to event '#{event.title}', but encountered #{results[:error_count]} errors: #{results[:errors].join(', ')}"
+      else
+        redirect_to collection_path, alert: "Failed to add files to event: #{results[:errors].join(', ')}"
+      end
+    rescue ActiveRecord::RecordNotFound
+      redirect_to add_to_existing_event_family_media_path, alert: "Selected event not found."
+    end
+  end
+
   # Show page configuration
   show do
     # Add CSS for hover effects
@@ -259,6 +465,20 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
           content_tag :div, "📂 Unsorted Storage", style: "font-size: 16px;", title: "Stored in unsorted organization structure"
         else
           content_tag :div, "❓ Unknown Storage", style: "font-size: 16px;", title: "Unknown storage class"
+        end
+      end
+      row "Event" do |medium|
+        if medium.event
+          link_to medium.event.title, admin_event_path(medium.event), style: "font-weight: bold;"
+        else
+          content_tag :div, "Not in an event", style: "color: #999;"
+        end
+      end
+      row "Subevent" do |medium|
+        if medium.subevent
+          link_to medium.subevent.hierarchy_path, admin_subevent_path(medium.subevent), style: "font-weight: bold;"
+        else
+          content_tag :div, "Not in a subevent", style: "color: #999;"
         end
       end
       row :user
