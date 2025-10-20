@@ -2,7 +2,7 @@ ActiveAdmin.register Photo do
 
   # Permitted parameters
   permit_params :title, :description, :file_path, :file_size, :width, :height, 
-                :taken_at, :exif_data, :thumbnail_path, :thumbnail_width, 
+                :exif_data, :thumbnail_path, :thumbnail_width, 
                 :thumbnail_height, :uploaded_by_id, :user_id, :original_filename, 
                 :content_type, :md5_hash, :latitude, :longitude, :camera_make, :camera_model
 
@@ -15,7 +15,14 @@ ActiveAdmin.register Photo do
     column :original_filename
     column :user
     column :uploaded_by
-    column :taken_at
+    column :effective_datetime do |photo|
+      if photo.effective_datetime
+        content_tag :div, photo.effective_datetime.strftime("%Y-%m-%d %H:%M"), 
+                    title: "Source: #{photo.datetime_source}"
+      else
+        content_tag :div, "No date", style: "color: #999;"
+      end
+    end
     column "Size" do |photo|
       "#{photo.width}×#{photo.height}"
     end
@@ -41,7 +48,7 @@ ActiveAdmin.register Photo do
   filter :original_filename
   filter :user
   filter :uploaded_by
-  filter :taken_at
+  filter :effective_datetime
   filter :camera_make
   filter :camera_model
   filter :content_type, as: :select, collection: %w[image/jpeg image/png image/gif image/bmp image/tiff]
@@ -69,7 +76,13 @@ ActiveAdmin.register Photo do
           "Not generated"
         end
       end
-      row :taken_at
+      row :effective_datetime do |photo|
+        if photo.effective_datetime
+          content_tag :div, photo.effective_datetime.strftime("%Y-%m-%d %H:%M:%S"), style: "font-weight: bold;"
+        else
+          content_tag :div, "No date available", style: "color: #cc0000; font-weight: bold;"
+        end
+      end
       row :user
       row :uploaded_by
       row :camera_make
@@ -121,7 +134,7 @@ ActiveAdmin.register Photo do
     end
 
     f.inputs "Metadata" do
-      f.input :taken_at, as: :datetime_picker
+      f.input :effective_datetime, as: :datetime_picker, label: "Effective Date/Time"
       f.input :camera_make
       f.input :camera_model
       f.input :latitude

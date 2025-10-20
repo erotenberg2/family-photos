@@ -10,7 +10,7 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
 
   # Permitted parameters
   permit_params :file_path, :file_size, :original_filename, :content_type, :md5_hash,
-                :width, :height, :taken_at, :medium_type, :uploaded_by_id, :user_id
+                :datetime_user, :datetime_intrinsic, :datetime_inferred, :medium_type, :uploaded_by_id, :user_id
 
   # Index page configuration
   index do
@@ -82,7 +82,14 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
     column :original_filename
     column :user
     column :uploaded_by
-    column :taken_at
+    column :effective_datetime do |medium|
+      if medium.effective_datetime
+        content_tag :div, medium.effective_datetime.strftime("%Y-%m-%d %H:%M"), 
+                    title: "Source: #{medium.datetime_source}"
+      else
+        content_tag :div, "No date", style: "color: #999;"
+      end
+    end
     column "File Size" do |medium|
       medium.file_size_human
     end
@@ -98,7 +105,9 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
   filter :original_filename
   filter :user
   filter :uploaded_by
-  filter :taken_at
+  filter :datetime_user
+  filter :datetime_intrinsic
+  filter :datetime_inferred
   filter :created_at
 
   # Show page configuration
@@ -163,11 +172,35 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
       row :file_size do |resource|
         resource.file_size_human
       end
-      row :taken_at
+      row :datetime_user do |medium|
+        if medium.datetime_user
+          content_tag :div, medium.datetime_user.strftime("%Y-%m-%d %H:%M:%S"), style: "color: #0066cc;"
+        else
+          content_tag :div, "Not set", style: "color: #999;"
+        end
+      end
+      row :datetime_intrinsic do |medium|
+        if medium.datetime_intrinsic
+          content_tag :div, medium.datetime_intrinsic.strftime("%Y-%m-%d %H:%M:%S"), style: "color: #009900;"
+        else
+          content_tag :div, "No EXIF data", style: "color: #999;"
+        end
+      end
+      row :datetime_inferred do |medium|
+        if medium.datetime_inferred
+          content_tag :div, medium.datetime_inferred.strftime("%Y-%m-%d %H:%M:%S"), style: "color: #ff6600;"
+        else
+          content_tag :div, "Not needed", style: "color: #999;"
+        end
+      end
+      row :effective_datetime do |medium|
+        if medium.effective_datetime
+          content_tag :div, medium.effective_datetime.strftime("%Y-%m-%d %H:%M:%S"), style: "font-weight: bold;"
+        else
+          content_tag :div, "No date available", style: "color: #cc0000; font-weight: bold;"
+        end
+      end
       row :datetime_source_last_modified
-      row :datetime_intrinsic
-      row :datetime_user
-      row :datetime_inferred
       row :user
       row :uploaded_by
       row :md5_hash

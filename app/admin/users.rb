@@ -92,7 +92,14 @@ ActiveAdmin.register User do
             link_to photo.title || photo.original_filename, admin_photo_path(photo)
           end
           column :original_filename
-          column :taken_at
+          column :effective_datetime do |photo|
+            if photo.effective_datetime
+              content_tag :div, photo.effective_datetime.strftime("%Y-%m-%d %H:%M"), 
+                          title: "Source: #{photo.datetime_source}"
+            else
+              content_tag :div, "No date", style: "color: #999;"
+            end
+          end
           column :file_size do |photo|
             photo.file_size_human
           end

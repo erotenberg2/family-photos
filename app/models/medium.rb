@@ -38,7 +38,7 @@ class Medium < ApplicationRecord
   def self.ransackable_attributes(auth_object = nil)
     ["client_file_path", "content_type", "created_at", "datetime_inferred", "datetime_intrinsic", "datetime_source_last_modified", 
      "datetime_user", "file_path", "file_size", "id", "latitude", "longitude", "md5_hash", "medium_type", "original_filename", 
-     "taken_at", "updated_at", "uploaded_by_id", "user_id"]
+     "updated_at", "uploaded_by_id", "user_id"]
   end
 
   def self.ransackable_associations(auth_object = nil)
@@ -46,7 +46,7 @@ class Medium < ApplicationRecord
   end
 
   # Scopes
-  scope :by_date, -> { order(:taken_at, :created_at) }
+  scope :by_date, -> { order(:datetime_user, :datetime_intrinsic, :datetime_inferred, :created_at) }
   scope :recent, -> { order(created_at: :desc) }
   scope :by_type, ->(type) { where(medium_type: type) }
   scope :photos, -> { where(medium_type: 'photo') }
@@ -105,8 +105,27 @@ class Medium < ApplicationRecord
     "#{size.round(1)} #{units[unit_index]}"
   end
 
+  # Get the effective datetime based on priority system
+  def effective_datetime
+    datetime_user || datetime_intrinsic || datetime_inferred
+  end
+
+  # Check if this medium has a valid datetime for file operations
+  def has_valid_datetime?
+    effective_datetime.present?
+  end
+
+  # Get the source of the effective datetime
+  def datetime_source
+    return 'user' if datetime_user.present?
+    return 'intrinsic' if datetime_intrinsic.present?
+    return 'inferred' if datetime_inferred.present?
+    'none'
+  end
+
+  # Legacy method for backwards compatibility
   def taken_date
-    taken_at || created_at
+    effective_datetime || created_at
   end
 
   # Delegate methods to mediable object for convenience
@@ -419,8 +438,16 @@ class Medium < ApplicationRecord
         datetime_intrinsic = photo.datetime_intrinsic
         Rails.logger.info "Extracted datetime_intrinsic: #{datetime_intrinsic} for #{medium.original_filename}"
         
-        # Update Medium with intrinsic datetime
-        medium.update_columns(datetime_intrinsic: datetime_intrinsic) if datetime_intrinsic
+        # Update Medium with intrinsic datetime or set inferred datetime
+        if datetime_intrinsic.present?
+          medium.update_columns(datetime_intrinsic: datetime_intrinsic)
+          Rails.logger.info "Set datetime_intrinsic: #{datetime_intrinsic} for #{medium.original_filename}"
+        else
+          # No EXIF datetime - use upload time as inferred
+          datetime_inferred = medium.created_at
+          medium.update_columns(datetime_inferred: datetime_inferred)
+          Rails.logger.info "Set datetime_inferred: #{datetime_inferred} for #{medium.original_filename}"
+        end
         
         # Update Medium with location data from Photo
         if photo.latitude.present? && photo.longitude.present?
@@ -431,11 +458,23 @@ class Medium < ApplicationRecord
     when 'audio'
       # Extract audio metadata when we add audio support
       datetime_intrinsic = medium.mediable.datetime_intrinsic if medium.mediable&.respond_to?(:datetime_intrinsic)
-      medium.update_columns(datetime_intrinsic: datetime_intrinsic) if datetime_intrinsic
+      
+      if datetime_intrinsic.present?
+        medium.update_columns(datetime_intrinsic: datetime_intrinsic)
+      else
+        datetime_inferred = medium.created_at
+        medium.update_columns(datetime_inferred: datetime_inferred)
+      end
     when 'video'
       # Extract video metadata when we add video support
       datetime_intrinsic = medium.mediable.datetime_intrinsic if medium.mediable&.respond_to?(:datetime_intrinsic)
-      medium.update_columns(datetime_intrinsic: datetime_intrinsic) if datetime_intrinsic
+      
+      if datetime_intrinsic.present?
+        medium.update_columns(datetime_intrinsic: datetime_intrinsic)
+      else
+        datetime_inferred = medium.created_at
+        medium.update_columns(datetime_inferred: datetime_inferred)
+      end
     end
     
     Rails.logger.info "Post-processing completed for: #{medium.original_filename}"
@@ -468,6 +507,64 @@ class Medium < ApplicationRecord
     
     Rails.logger.info "Batch post-processing completed. Processed: #{processed_count}, Errors: #{errors.length}"
     { processed_count: processed_count, errors: errors }
+  end
+
+  # Override destroy_all to include cleanup
+  def self.destroy_all
+    result = super
+    cleanup
+    result
+  end
+
+  # Cleanup orphaned files in storage directories
+  def self.cleanup
+    Rails.logger.info "Starting cleanup of orphaned files in storage"
+    
+    # Get all file paths from database
+    db_file_paths = pluck(:file_path).to_set
+    Rails.logger.info "Found #{db_file_paths.size} files in database"
+    
+    # Get all files in storage directories
+    storage_base = Rails.root.join('storage')
+    orphaned_files = []
+    
+    # Check each medium type directory
+    %w[photos videos audios].each do |medium_type|
+      storage_dir = storage_base.join(medium_type)
+      next unless Dir.exist?(storage_dir)
+      
+      Dir.glob(storage_dir.join('**', '*')).each do |file_path|
+        next unless File.file?(file_path)
+        
+        # Convert to string for comparison
+        file_path_str = file_path.to_s
+        
+        unless db_file_paths.include?(file_path_str)
+          orphaned_files << file_path_str
+        end
+      end
+    end
+    
+    Rails.logger.info "Found #{orphaned_files.size} orphaned files"
+    
+    # Delete orphaned files
+    deleted_count = 0
+    errors = []
+    
+    orphaned_files.each do |file_path|
+      begin
+        File.delete(file_path)
+        deleted_count += 1
+        Rails.logger.debug "Deleted orphaned file: #{file_path}"
+      rescue => e
+        error_msg = "#{file_path}: #{e.message}"
+        errors << error_msg
+        Rails.logger.error "Failed to delete #{file_path}: #{e.message}"
+      end
+    end
+    
+    Rails.logger.info "Cleanup completed. Deleted: #{deleted_count}, Errors: #{errors.length}"
+    { deleted_count: deleted_count, errors: errors, orphaned_files: orphaned_files }
   end
 
   private

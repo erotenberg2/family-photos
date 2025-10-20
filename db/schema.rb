@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_09_28_173221) do
+ActiveRecord::Schema[8.0].define(version: 2025_10_19_203458) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -102,7 +102,6 @@ ActiveRecord::Schema[8.0].define(version: 2025_09_28_173221) do
     t.string "original_filename"
     t.string "content_type"
     t.string "md5_hash", null: false
-    t.datetime "taken_at"
     t.bigint "uploaded_by_id", null: false
     t.bigint "user_id", null: false
     t.string "medium_type", null: false
@@ -134,7 +133,6 @@ ActiveRecord::Schema[8.0].define(version: 2025_09_28_173221) do
     t.index ["md5_hash"], name: "index_media_on_md5_hash", unique: true
     t.index ["mediable_type", "mediable_id"], name: "index_media_on_mediable"
     t.index ["medium_type"], name: "index_media_on_medium_type"
-    t.index ["taken_at"], name: "index_media_on_taken_at"
     t.index ["uploaded_by_id"], name: "index_media_on_uploaded_by_id"
     t.index ["user_id"], name: "index_media_on_user_id"
   end

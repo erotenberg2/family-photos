@@ -37,8 +37,8 @@ class Photo < ApplicationRecord
   
   # Delegate generic media attributes to Medium
   delegate :file_path, :file_size, :original_filename, :content_type, :md5_hash,
-           :taken_at, :uploaded_by, :user, :file_size_human,
-           :taken_date, :file_exists?, to: :medium, allow_nil: true
+           :uploaded_by, :user, :file_size_human, :effective_datetime,
+           :has_valid_datetime?, :datetime_source, :taken_date, :file_exists?, to: :medium, allow_nil: true
            
   # Note: Medium creates Photo, not the other way around
 
@@ -63,7 +63,7 @@ class Photo < ApplicationRecord
   }
   
   # Scopes that work with Medium
-  scope :by_date, -> { joins(:medium).order('media.taken_at, media.created_at') }
+  scope :by_date, -> { joins(:medium).order('media.datetime_user, media.datetime_intrinsic, media.datetime_inferred, media.created_at') }
   scope :by_file_type, ->(type) { joins(:medium).where(media: { content_type: type }) }
 
   # Callbacks removed - all processing now handled explicitly in post-processing
@@ -299,7 +299,7 @@ class Photo < ApplicationRecord
   end
 
   def taken_date
-    taken_at || created_at
+    effective_datetime || created_at
   end
 
   def generate_thumbnail
@@ -345,11 +345,7 @@ class Photo < ApplicationRecord
     self.camera_make = find_exif_value_case_insensitive(exif_info, ['make', 'Make'])
     self.camera_model = find_exif_value_case_insensitive(exif_info, ['model', 'Model'])
     
-    # Set taken_at on the medium record
-    date_time_original = find_exif_value_case_insensitive(exif_info, ['date_time_original', 'DateTimeOriginal', 'DateTime'])
-    if date_time_original && medium
-      medium.update_column(:taken_at, date_time_original)
-    end
+    # Note: datetime_intrinsic will be set in Medium.post_process_media after EXIF extraction
     
     # GPS coordinates are photo-specific and stay on the photo record
     # Handle both string and symbol keys for GPS data

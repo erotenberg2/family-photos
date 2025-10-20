@@ -48,7 +48,14 @@ ActiveAdmin.register Photo, namespace: :family do
     column :original_filename
     column :user
     column :uploaded_by
-    column :taken_at
+    column :effective_datetime do |photo|
+      if photo.effective_datetime
+        content_tag :div, photo.effective_datetime.strftime("%Y-%m-%d %H:%M"), 
+                    title: "Source: #{photo.datetime_source}"
+      else
+        content_tag :div, "No date", style: "color: #999;"
+      end
+    end
     column "Size" do |photo|
       if photo.width && photo.height
         "#{photo.width}×#{photo.height}"
@@ -144,7 +151,13 @@ ActiveAdmin.register Photo, namespace: :family do
           "Not generated"
         end
       end
-      row :taken_at
+      row :effective_datetime do |photo|
+        if photo.effective_datetime
+          content_tag :div, photo.effective_datetime.strftime("%Y-%m-%d %H:%M:%S"), style: "font-weight: bold;"
+        else
+          content_tag :div, "No date available", style: "color: #cc0000; font-weight: bold;"
+        end
+      end
       row :user
       row :uploaded_by
       row :camera_make

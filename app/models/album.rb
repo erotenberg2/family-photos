@@ -73,7 +73,9 @@ class Album < ApplicationRecord
   end
   
   def date_range
-    photo_dates = photos.where.not(taken_at: nil).pluck(:taken_at)
+    photo_dates = photos.joins(:medium).where.not(media: { datetime_user: nil }).pluck('media.datetime_user')
+    photo_dates += photos.joins(:medium).where(media: { datetime_user: nil }).where.not(media: { datetime_intrinsic: nil }).pluck('media.datetime_intrinsic')
+    photo_dates += photos.joins(:medium).where(media: { datetime_user: nil, datetime_intrinsic: nil }).where.not(media: { datetime_inferred: nil }).pluck('media.datetime_inferred')
     return nil if photo_dates.empty?
     
     {
