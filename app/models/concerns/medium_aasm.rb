@@ -201,6 +201,7 @@ module MediumAasm
     # Check if file already exists at target location
     if File.exist?(target_file_path)
       Rails.logger.warn "AASM Guard: Cannot move to daily - file already exists at #{target_file_path}"
+      @guard_failure_reason = "file name conflict"
       return false
     end
     
@@ -218,6 +219,7 @@ module MediumAasm
     # Check if file already exists at target location
     if File.exist?(target_file_path)
       Rails.logger.warn "AASM Guard: Cannot move to unsorted - file already exists at #{target_file_path}"
+      @guard_failure_reason = "file name conflict"
       return false
     end
     

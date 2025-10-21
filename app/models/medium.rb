@@ -647,7 +647,7 @@ class Medium < ApplicationRecord
     end
   end
 
-  private
+  
 
   def self.save_uploaded_file_to_path(uploaded_file, file_path)
     if uploaded_file.respond_to?(:tempfile) && uploaded_file.tempfile
@@ -1005,6 +1005,32 @@ class Medium < ApplicationRecord
     
     removed_count
   end
+
+  def analyze_transition(event_name)
+    event = self.class.aasm.events.find { |e| e.name == event_name }
+    return { allowed_transition: false } unless event
+    
+    current = aasm.current_state
+    transition = event.transitions.find { |t| 
+      t.from == current || 
+      (t.from.is_a?(Array) && t.from.include?(current))
+    }
+    return { allowed_transition: false } unless transition
+    
+    # Get guards and test each one
+    guards = Array(transition.options[:guard])
+    guard_results = {}
+    guards.each do |guard|
+      if guard.is_a?(Proc)
+        guard_results[:"proc_#{guards.index(guard)}"] = instance_exec(&guard)
+      else
+        guard_results[guard] = send(guard)
+      end
+    end
+    
+    { allowed_transition: true, guard_results: guard_results.to_a }
+  end
+
 
   private
 

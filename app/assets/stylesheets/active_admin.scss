@@ -65,5 +65,17 @@
       border-color: #007bff !important;
       box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25) !important;
     }
+    
+    option:disabled {
+      color: red !important;
+      background-color: #ffe6e6 !important;
+      font-style: italic;
+    }
+    
+    option[disabled] {
+      color: red !important;
+      background-color: #ffe6e6 !important;
+      font-style: italic;
+    }
   }
 }

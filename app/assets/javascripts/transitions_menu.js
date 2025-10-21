@@ -2,10 +2,18 @@
 window.TransitionsMenu = {
   submitTransition: function(selectElement, mediumId) {
     const selectedValue = selectElement.value;
-    const selectedText = selectElement.options[selectElement.selectedIndex].text;
+    const selectedOption = selectElement.options[selectElement.selectedIndex];
+    const selectedText = selectedOption.text;
     
     if (!selectedValue) {
       return; // No selection made
+    }
+    
+    // Check if the option is disabled
+    if (selectedOption.disabled) {
+      // Reset to the first option (Move to...)
+      selectElement.selectedIndex = 0;
+      return;
     }
     
     if (confirm('Move to ' + selectedText + '?')) {
