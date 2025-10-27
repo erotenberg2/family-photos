@@ -202,12 +202,11 @@ class Subevent < ApplicationRecord
           # Use the current_filename from the database
           current_filename = medium.current_filename
           
-          # Move to parent event directory (not unsorted)
+          # Move to parent event directory (not unsorted) - all media types together
           event_dir = File.join(Constants::EVENTS_STORAGE, event.folder_path)
-          type_dir = File.join(event_dir, medium.medium_type.pluralize)
-          FileUtils.mkdir_p(type_dir) unless Dir.exist?(type_dir)
+          FileUtils.mkdir_p(event_dir) unless Dir.exist?(event_dir)
           
-          new_path = File.join(type_dir, current_filename)
+          new_path = File.join(event_dir, current_filename)
           
           # Handle filename conflicts by adding -(1), -(2), etc. (database-based)
           if File.exist?(new_path) || !Medium.is_filename_unique_in_database(current_filename)

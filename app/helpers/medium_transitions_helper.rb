@@ -47,12 +47,12 @@ module MediumTransitionsHelper
       
       content_tag :div do
         content = select_html
-        if error_messages.any?
-          error_html = content_tag(:div, 
-                                error_messages.join("; "), 
-                                style: "font-size: 9px; color: red; margin-top: 2px; line-height: 1.1; max-width: 200px;")
-          content += error_html
-        end
+        # if error_messages.any?
+        #   error_html = content_tag(:div, 
+        #                         error_messages.join("; "), 
+        #                         style: "font-size: 9px; color: red; margin-top: 2px; line-height: 1.1; max-width: 200px;")
+        #   content += error_html
+        # end
         content
       end
     end

@@ -7,13 +7,12 @@ class FileOrganizationService
     def move_single_to_unsorted(medium)
       Rails.logger.info "FileOrganizationService: Moving medium #{medium.id} to unsorted storage"
       
-      # Determine storage directory based on medium type
-      type_dir = File.join(Constants::UNSORTED_STORAGE, medium.medium_type.pluralize)
-      FileUtils.mkdir_p(type_dir) unless Dir.exist?(type_dir)
+      # All media types go directly in unsorted (no type subdirectory)
+      FileUtils.mkdir_p(Constants::UNSORTED_STORAGE) unless Dir.exist?(Constants::UNSORTED_STORAGE)
       
       # Use the current_filename from the database
       current_filename = medium.current_filename
-      new_path = File.join(type_dir, current_filename)
+      new_path = File.join(Constants::UNSORTED_STORAGE, current_filename)
       
       # Handle filename conflicts by adding -(1), -(2), etc. (database-based)
       # Check if the file already exists at the destination (excluding the current record)
@@ -36,7 +35,7 @@ class FileOrganizationService
         
         loop do
           new_filename = "#{base_name}-(#{counter})#{extension}"
-          new_path = File.join(type_dir, new_filename)
+          new_path = File.join(Constants::UNSORTED_STORAGE, new_filename)
           
           destination_exists = File.exist?(new_path)
           db_exists = Medium.where.not(id: medium.id).where("LOWER(current_filename) = ?", new_filename.downcase).exists?
@@ -60,7 +59,7 @@ class FileOrganizationService
         FileUtils.mv(medium.full_file_path, new_path)
         
         # Update the database record
-        medium.update!(file_path: type_dir, current_filename: current_filename, storage_class: 'unsorted')
+        medium.update!(file_path: Constants::UNSORTED_STORAGE, current_filename: current_filename, storage_class: 'unsorted')
         
         Rails.logger.info "  ✅ Moved Medium #{medium.id} to unsorted: #{new_path}"
         
@@ -71,7 +70,7 @@ class FileOrganizationService
       else
         Rails.logger.warn "  ⚠️ File not found: #{medium.full_file_path}"
         # Still update the database record
-        medium.update!(file_path: type_dir, current_filename: current_filename, storage_class: 'unsorted')
+        medium.update!(file_path: Constants::UNSORTED_STORAGE, current_filename: current_filename, storage_class: 'unsorted')
         false
       end
     rescue => e
@@ -126,17 +125,13 @@ class FileOrganizationService
       
       event = Event.find(event_id)
       
-      # Create event directory
+      # Create event directory (all media types together)
       event_dir = File.join(Constants::EVENTS_STORAGE, event.folder_name)
       FileUtils.mkdir_p(event_dir) unless Dir.exist?(event_dir)
       
-      # Create subdirectories by medium type
-      type_dir = File.join(event_dir, medium.medium_type.pluralize)
-      FileUtils.mkdir_p(type_dir) unless Dir.exist?(type_dir)
-      
       # Use the current_filename from the database
       current_filename = medium.current_filename
-      new_path = File.join(type_dir, current_filename)
+      new_path = File.join(event_dir, current_filename)
       
       # Move the file if it exists
       if File.exist?(medium.full_file_path)
@@ -192,13 +187,9 @@ class FileOrganizationService
       
       FileUtils.mkdir_p(subevent_dir) unless Dir.exist?(subevent_dir)
       
-      # Create subdirectories by medium type
-      type_dir = File.join(subevent_dir, medium.medium_type.pluralize)
-      FileUtils.mkdir_p(type_dir) unless Dir.exist?(type_dir)
-      
-      # Use the current_filename from the database
+      # Use the current_filename from the database (all media types together)
       current_filename = medium.current_filename
-      new_path = File.join(type_dir, current_filename)
+      new_path = File.join(subevent_dir, current_filename)
       
       # Move the file if it exists
       if File.exist?(medium.full_file_path)
@@ -307,8 +298,7 @@ class FileOrganizationService
         when 'event'
           event = Event.find(event_id)
           event_dir = File.join(Constants::EVENTS_STORAGE, event.folder_name)
-          type_dir = File.join(event_dir, medium.medium_type.pluralize)
-          target_path = File.join(type_dir, medium.current_filename)
+          target_path = File.join(event_dir, medium.current_filename)
         else
           next
         end
@@ -332,7 +322,7 @@ class FileOrganizationService
     def generate_daily_storage_path(medium)
       date = medium.effective_datetime
       
-      # Format: daily/YYYY/MM/DD/filename
+      # Format: daily/YYYY/MM/DD/filename (all media types together)
       year = date.year.to_s
       month = date.month.to_s.rjust(2, '0')
       day = date.day.to_s.rjust(2, '0')
@@ -340,7 +330,7 @@ class FileOrganizationService
       # Use the current_filename from the database
       current_filename = medium.current_filename
       
-      File.join(Constants::DAILY_STORAGE, medium.medium_type.pluralize, year, month, day, current_filename)
+      File.join(Constants::DAILY_STORAGE, year, month, day, current_filename)
     end
     
     # Clean up empty directories after moving files (public so it can be called from outside)
@@ -392,13 +382,9 @@ class FileOrganizationService
     media.each do |medium|
       begin
         if medium.has_valid_datetime?
-          # Create subdirectories by medium type
-          type_dir = File.join(event_dir, medium.medium_type.pluralize)
-          FileUtils.mkdir_p(type_dir) unless Dir.exist?(type_dir)
-          
-          # Use the current_filename from the database (preserve original filename)
+          # Use the current_filename from the database (all media types together)
           current_filename = medium.current_filename
-          new_path = File.join(type_dir, current_filename)
+          new_path = File.join(event_dir, current_filename)
           
           # Move the file
           if File.exist?(medium.full_file_path)
@@ -458,17 +444,13 @@ class FileOrganizationService
     media.each do |medium|
       begin
         if medium.has_valid_datetime?
-          # Create subdirectories by medium type
-          type_dir = File.join(subevent_dir, medium.medium_type.pluralize)
-          FileUtils.mkdir_p(type_dir) unless Dir.exist?(type_dir)
-          
-          # Generate new filename (YYYYMMDD_HHMMSS_originalfilename.ext)
+          # Generate new filename (YYYYMMDD_HHMMSS_originalfilename.ext) - all media types together
           date = medium.effective_datetime
           timestamp = date.strftime("%Y%m%d_%H%M%S")
           base_name = File.basename(medium.original_filename, '.*')
           extension = File.extname(medium.original_filename)
           new_filename = "#{timestamp}_#{base_name}#{extension}"
-          new_path = File.join(type_dir, new_filename)
+          new_path = File.join(subevent_dir, new_filename)
           
           # Move the file
           if File.exist?(medium.file_path)

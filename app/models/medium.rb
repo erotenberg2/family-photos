@@ -500,9 +500,9 @@ class Medium < ApplicationRecord
     # Ensure global uniqueness by checking for duplicates
     stored_filename = ensure_unique_filename(stored_filename)
     
-    # Create upload directory in unsorted storage
+    # Create upload directory in unsorted storage (all media types together)
     require_relative '../../lib/constants'
-    upload_dir = File.join(Constants::UNSORTED_STORAGE, medium_type.pluralize)
+    upload_dir = Constants::UNSORTED_STORAGE
     FileUtils.mkdir_p(upload_dir) unless Dir.exist?(upload_dir)
     
     # Full file path for saving
@@ -827,20 +827,15 @@ class Medium < ApplicationRecord
     require_relative '../../lib/constants'
     orphaned_files = []
     
-    # Check each storage directory
+    # Check each storage directory (all media types together now)
     [Constants::UNSORTED_STORAGE, Constants::DAILY_STORAGE].each do |storage_base|
       next unless Dir.exist?(storage_base)
       
-      %w[photos videos audios].each do |medium_type|
-        storage_dir = File.join(storage_base, medium_type)
-        next unless Dir.exist?(storage_dir)
+      Dir.glob(File.join(storage_base, '**', '*')).each do |file_path|
+        next unless File.file?(file_path)
         
-        Dir.glob(File.join(storage_dir, '**', '*')).each do |file_path|
-          next unless File.file?(file_path)
-          
-          unless db_file_paths.include?(file_path)
-            orphaned_files << file_path
-          end
+        unless db_file_paths.include?(file_path)
+          orphaned_files << file_path
         end
       end
     end

@@ -296,11 +296,10 @@ class Event < ApplicationRecord
           # Use the current_filename from the database
           current_filename = medium.current_filename
           
-          # Determine storage directory based on medium type
-          type_dir = File.join(Constants::UNSORTED_STORAGE, medium.medium_type.pluralize)
-          FileUtils.mkdir_p(type_dir) unless Dir.exist?(type_dir)
+          # All media types go directly in unsorted (no type subdirectory)
+          FileUtils.mkdir_p(Constants::UNSORTED_STORAGE) unless Dir.exist?(Constants::UNSORTED_STORAGE)
           
-          new_path = File.join(type_dir, current_filename)
+          new_path = File.join(Constants::UNSORTED_STORAGE, current_filename)
           
           # Handle filename conflicts by adding -(1), -(2), etc. (database-based)
           if File.exist?(new_path) || !Medium.is_filename_unique_in_database(current_filename)
@@ -310,10 +309,11 @@ class Event < ApplicationRecord
             counter = 1
             loop do
               new_filename = "#{base_name}-(#{counter})#{extension}"
-              new_path = File.join(type_dir, new_filename)
+              new_path = File.join(Constants::UNSORTED_STORAGE, new_filename)
               
               if Medium.is_filename_unique_in_database(new_filename)
                 Rails.logger.info "  ⚠️ Filename conflict resolved: #{current_filename} -> #{new_filename}"
+                current_filename = new_filename
                 break
               end
               
@@ -322,8 +322,8 @@ class Event < ApplicationRecord
             end
           end
           
-          Rails.logger.info "  Target directory: #{type_dir}"
-          Rails.logger.info "  Target directory exists: #{Dir.exist?(type_dir)}"
+          Rails.logger.info "  Target directory: #{Constants::UNSORTED_STORAGE}"
+          Rails.logger.info "  Target directory exists: #{Dir.exist?(Constants::UNSORTED_STORAGE)}"
           Rails.logger.info "  New file path: #{new_path}"
           Rails.logger.info "  New path already exists: #{File.exist?(new_path)}"
           
@@ -337,7 +337,7 @@ class Event < ApplicationRecord
             
             # Update the medium record
             medium.update!(
-              file_path: type_dir,  # Store only the directory path
+              file_path: Constants::UNSORTED_STORAGE,  # Store only the directory path
               current_filename: File.basename(new_path),
               storage_class: 'unsorted',
               event_id: nil,
