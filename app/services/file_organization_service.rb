@@ -16,16 +16,32 @@ class FileOrganizationService
       new_path = File.join(type_dir, current_filename)
       
       # Handle filename conflicts by adding -(1), -(2), etc. (database-based)
-      if File.exist?(new_path) || !Medium.is_filename_unique_in_database(current_filename)
+      # Check if the file already exists at the destination (excluding the current record)
+      destination_file_exists = File.exist?(new_path)
+      db_conflict_exists = Medium.where.not(id: medium.id).where("LOWER(current_filename) = ?", current_filename.downcase).exists?
+      
+      if destination_file_exists || db_conflict_exists
         extension = File.extname(current_filename)
         base_name = File.basename(current_filename, extension)
         
-        counter = 1
+        # Check if filename already has a -(N) suffix
+        if base_name =~ /-\((\d+)\)$/
+          # Already has a suffix, increment it
+          counter = $1.to_i + 1
+          base_name = base_name.sub(/-\(\d+\)$/, '')
+        else
+          # No suffix, start at 1
+          counter = 1
+        end
+        
         loop do
           new_filename = "#{base_name}-(#{counter})#{extension}"
           new_path = File.join(type_dir, new_filename)
           
-          if !File.exist?(new_path) && Medium.is_filename_unique_in_database(new_filename)
+          destination_exists = File.exist?(new_path)
+          db_exists = Medium.where.not(id: medium.id).where("LOWER(current_filename) = ?", new_filename.downcase).exists?
+          
+          if !destination_exists && !db_exists
             current_filename = new_filename
             Rails.logger.info "  ⚠️ Filename conflict resolved: #{medium.current_filename} -> #{new_filename}"
             break

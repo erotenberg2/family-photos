@@ -17,39 +17,8 @@ window.TransitionsMenu = {
     }
     
     if (confirm('Move to ' + selectedText + '?')) {
-      // Create a form dynamically to submit the transition
-      const form = document.createElement('form');
-      form.method = 'POST';
-      form.action = `/family/media/${mediumId}/execute_transition`;
-      
-      // Add CSRF token
-      const csrfToken = document.querySelector('meta[name="csrf-token"]');
-      if (csrfToken) {
-        const tokenInput = document.createElement('input');
-        tokenInput.type = 'hidden';
-        tokenInput.name = 'authenticity_token';
-        tokenInput.value = csrfToken.getAttribute('content');
-        form.appendChild(tokenInput);
-      }
-      
-      // Add method override for PATCH
-      const methodInput = document.createElement('input');
-      methodInput.type = 'hidden';
-      methodInput.name = '_method';
-      methodInput.value = 'patch';
-      form.appendChild(methodInput);
-      
-      // Add transition parameter
-      const transitionInput = document.createElement('input');
-      transitionInput.type = 'hidden';
-      transitionInput.name = 'transition';
-      transitionInput.value = selectedValue;
-      form.appendChild(transitionInput);
-      
-      // Submit the form
-      document.body.appendChild(form);
-      form.submit();
-      document.body.removeChild(form);
+      // For GET requests, we can just redirect
+      window.location.href = `/family/media/${mediumId}/execute_transition?transition=${encodeURIComponent(selectedValue)}`;
     } else {
       // Reset to default option
       selectElement.selectedIndex = 0;

@@ -1007,7 +1007,10 @@ class Medium < ApplicationRecord
   end
 
   def analyze_transition(event_name)
-    event = self.class.aasm.events.find { |e| e.name == event_name }
+    # Convert to symbol if it's a string
+    event_name_sym = event_name.is_a?(Symbol) ? event_name : event_name.to_sym
+    
+    event = self.class.aasm.events.find { |e| e.name == event_name_sym }
     return { allowed_transition: false } unless event
     
     current = aasm.current_state
@@ -1028,7 +1031,11 @@ class Medium < ApplicationRecord
       end
     end
     
-    { allowed_transition: true, guard_results: guard_results.to_a }
+    { 
+      allowed_transition: true, 
+      guard_results: guard_results.to_a,
+      target_state: transition.to  # Add the target state
+    }
   end
 
 

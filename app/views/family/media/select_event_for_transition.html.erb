@@ -1,0 +1,39 @@
+<% content_for :title, "Select Event" %>
+
+<div class="select-event-form">
+  <h2>Select Event for Media</h2>
+  
+  <div class="media-info">
+    <p><strong>Medium:</strong> <%= @medium.original_filename %></p>
+    <p><strong>Current State:</strong> <%= @medium.aasm.current_state.to_s.humanize %></p>
+  </div>
+  
+  <% if @existing_events.empty? %>
+    <div class="alert alert-info">
+      <h4>No Events Available</h4>
+      <p>There are no existing events. Please create a new event first.</p>
+      <%= link_to "Create New Event", new_family_event_path, class: "btn btn-primary" %>
+    </div>
+  <% else %>
+    <%= form_with url: complete_transition_family_medium_path(@medium), method: :post, local: true, class: "event-form" do |form| %>
+      <div class="form-group">
+        <%= form.label :event_id, "Select Event:", class: "form-label" %>
+        <%= form.select :event_id, 
+                        options_from_collection_for_select(@existing_events, :id, :title_with_date_range),
+                        { prompt: "Choose an event..." },
+                        { class: "form-control", required: true } %>
+        <small class="form-text text-muted">
+          Select the event you want to move this media to.
+        </small>
+      </div>
+      
+      <div class="form-actions">
+        <%= form.submit "Move to Event", class: "btn btn-primary" %>
+        <%= link_to "Cancel", family_medium_path(@medium), class: "btn btn-secondary" %>
+      </div>
+    <% end %>
+  <% end %>
+</div>
+
+<%= render partial: 'shared/form_styles' %>
+

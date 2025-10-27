@@ -672,40 +672,46 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
   controller do
     helper MediumTransitionsHelper
     
-    # COMMENTED OUT FOR DEBUGGING - investigating why member_action isn't being called
-    # def update
-    #   if params[:medium] && params[:medium][:descriptive_name].present?
-    #     new_descriptive_name = params[:medium][:descriptive_name].strip
-    #     
-    #     if new_descriptive_name.blank?
-    #       redirect_to edit_family_medium_path(resource), alert: "Descriptive name cannot be blank."
-    #       return
-    #     end
-    #     
-    #     begin
-    #       # Generate new filename using datetime priority scheme
-    #       new_filename = generate_filename_from_datetime_and_descriptive_name(resource, new_descriptive_name)
-    #       
-    #       # Check if the new filename would conflict with existing files
-    #       if Medium.where(current_filename: new_filename).where.not(id: resource.id).exists?
-    #         redirect_to edit_family_medium_path(resource), alert: "A file with this name already exists."
-    #         return
-    #     end
-    #     
-    #       # Update the current_filename, which will trigger the callback to rename the file
-    #       resource.update!(current_filename: new_filename)
-    #     
-    #       redirect_to family_medium_path(resource), notice: "Filename updated successfully to '#{new_filename}'."
-    #       return
-    #     rescue => e
-    #       redirect_to edit_family_medium_path(resource), alert: "Error updating filename: #{e.message}"
-    #       return
-    #     end
-    #   end
-    #   
-    #   # If no descriptive_name provided, do normal update
-    #   super
-    # end
+    def update
+      if params[:medium] && params[:medium][:descriptive_name].present?
+        new_descriptive_name = params[:medium][:descriptive_name].strip
+        
+        if new_descriptive_name.blank?
+          redirect_to edit_family_medium_path(resource), alert: "Descriptive name cannot be blank."
+          return
+        end
+        
+        begin
+          # Generate new filename using datetime priority scheme
+          new_filename = generate_filename_from_datetime_and_descriptive_name(resource, new_descriptive_name)
+          
+          # Check if the new filename would conflict with existing files (excluding current record)
+          if Medium.where("LOWER(current_filename) = ?", new_filename.downcase).where.not(id: resource.id).exists?
+            redirect_to edit_family_medium_path(resource), alert: "A file with this name already exists."
+            return
+          end
+          
+          # Also check if file exists on disk at the destination
+          new_full_path = File.join(resource.file_path, new_filename)
+          if File.exist?(new_full_path)
+            redirect_to edit_family_medium_path(resource), alert: "A file with this name already exists on disk."
+            return
+          end
+          
+          # Update the current_filename, which will trigger the callback to rename the file
+          resource.update!(current_filename: new_filename)
+        
+          redirect_to family_medium_path(resource), notice: "Filename updated successfully to '#{new_filename}'."
+          return
+        rescue => e
+          redirect_to edit_family_medium_path(resource), alert: "Error updating filename: #{e.message}"
+          return
+        end
+      end
+      
+      # If no descriptive_name provided, do normal update
+      super
+    end
 
     private
 
@@ -951,46 +957,96 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
   end
 
   # Member action to execute state transitions
-  member_action :execute_transition, method: :patch do
+  member_action :execute_transition, method: :get do
     transition_event = params[:transition]
     
-    # Handle event-related transitions that need user input
-    event_transitions = ['move_to_event', 'move_to_subevent_level1', 'move_to_subevent_level2',
-                         'move_daily_to_event', 'move_daily_to_subevent_level1', 'move_daily_to_subevent_level2',
-                         'move_event_to_subevent_level1', 'move_event_to_subevent_level2',
-                         'move_subevent1_to_subevent2', 'move_subevent2_to_subevent1']
+    # Analyze the transition to determine target state
+    analysis = resource.analyze_transition(transition_event)
     
-    if event_transitions.include?(transition_event)
-      # For event transitions, we need to create/show a dialog
-      # Store the transition in session and redirect to appropriate action
-      session[:pending_transition] = transition_event
-      session[:pending_transition_medium_id] = resource.id
-      
-      case transition_event
-      when 'move_to_event', 'move_daily_to_event', 'move_subevent1_to_event', 'move_subevent2_to_event'
-        # Create new event - redirect to event creation form
-        session[:selected_media_ids] = [resource.id]
-        redirect_to new_event_from_media_family_media_path
-      when 'move_to_subevent_level1', 'move_daily_to_subevent_level1', 'move_event_to_subevent_level1', 'move_subevent2_to_subevent1'
-        # Add to existing event - redirect to event selection
-        session[:selected_media_ids_for_existing] = [resource.id]
-        redirect_to add_to_existing_event_family_media_path
-      when 'move_to_subevent_level2', 'move_daily_to_subevent_level2', 'move_event_to_subevent_level2', 'move_subevent1_to_subevent2'
-        # Add to subevent - redirect to event selection (for now, same as adding to event)
-        session[:selected_media_ids_for_existing] = [resource.id]
-        redirect_to add_to_existing_event_family_media_path
-      end
-    elsif resource.respond_to?(transition_event)
-      # For non-event transitions, execute directly
+    if !analysis[:allowed_transition]
+      redirect_to family_medium_path(resource), alert: "This transition is not available"
+      return
+    end
+    
+    target_state = analysis[:target_state]
+    
+    # Store transition info in session for later execution
+    session[:pending_transition] = transition_event
+    session[:pending_transition_medium_id] = resource.id
+    
+    # Determine which form to show based on target state
+    case target_state.to_s
+    when 'event_root'
+      # Need to select an event
+      redirect_to select_event_for_transition_family_media_path(id: resource.id)
+    when 'subevent_level1'
+      # Need to select event and subevent level 1
+      redirect_to select_subevent_for_transition_family_media_path(id: resource.id, level: 1)
+    when 'subevent_level2'
+      # Need to select event, subevent level 1, and subevent level 2
+      redirect_to select_subevent_for_transition_family_media_path(id: resource.id, level: 2)
+    else
+      # Direct transitions (unsorted, daily) - execute immediately
       begin
         resource.send("#{transition_event}!")
-        redirect_to family_medium_path(resource), notice: "Successfully moved media to #{transition_event.humanize}"
+        redirect_to family_medium_path(resource), notice: "Successfully moved to #{target_state.to_s.humanize}"
       rescue => e
-        redirect_to family_medium_path(resource), alert: "Failed to move media: #{e.message}"
+        redirect_to family_medium_path(resource), alert: "Failed to move: #{e.message}"
       end
-    else
-      redirect_to family_medium_path(resource), alert: "Invalid transition: #{transition_event}"
     end
+  end
+
+  # Member action to show form for selecting event
+  member_action :select_event_for_transition, method: :get do
+    @medium = resource
+    @pending_transition = session[:pending_transition]
+    @existing_events = Event.order(:title)
+  end
+
+  # Member action to process event selection and execute transition
+  member_action :complete_transition, method: :post do
+    @medium = resource
+    pending_transition = session[:pending_transition]
+    
+    if pending_transition.blank?
+      redirect_to family_medium_path(@medium), alert: "No pending transition found"
+      return
+    end
+    
+    event_id = params[:event_id]
+    subevent_id = params[:subevent_id]
+    
+    # Set instance variables for the AASM callback to validate and use
+    @medium.instance_variable_set(:@pending_event_id, event_id) if event_id.present?
+    @medium.instance_variable_set(:@pending_subevent_id, subevent_id) if subevent_id.present?
+    
+    # Execute the state machine transition
+    begin
+      @medium.send("#{pending_transition}!")
+      
+      # Clear the session
+      session[:pending_transition] = nil
+      
+      # Redirect to appropriate destination
+      if @medium.event.present?
+        redirect_to family_event_path(@medium.event), notice: "Successfully moved media."
+      else
+        redirect_to family_medium_path(@medium), notice: "Successfully moved media."
+      end
+    rescue => e
+      # Clear the session
+      session[:pending_transition] = nil
+      
+      redirect_to family_medium_path(@medium), alert: "Failed to move media: #{e.message}"
+    end
+  end
+
+  # Member action to show form for selecting subevent (handles both level 1 and level 2)
+  member_action :select_subevent_for_transition, method: :get do
+    @medium = resource
+    @pending_transition = session[:pending_transition]
+    @level = params[:level].to_i
+    @existing_events = Event.includes(:subevents).order(:title)
   end
 
 end

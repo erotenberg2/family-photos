@@ -11,7 +11,7 @@ module MediumTransitionsHelper
       
       all_transitions.each do |transition|
         if transition[:available]
-          available_options << [transition[:label], transition[:event]]
+          available_options << [transition[:label], transition[:event].to_s]
         elsif transition[:reason].present?
           # Only show blocked options that have a specific guard failure reason
           blocked_options << ["🚫 #{transition[:label]}", "", { disabled: true, style: "color: red; background-color: #ffe6e6;" }]
@@ -58,107 +58,16 @@ module MediumTransitionsHelper
     end
   end
 
-  def get_available_transitions(medium)
-    # Use AASM to get available events for the current state
-    available_events = medium.aasm.events(permitted: true).map(&:name)
-    
-    # Map AASM events to user-friendly labels
-    event_labels = {
-      'move_to_daily' => 'Move to Daily',
-      'move_to_event' => 'Create New Event',
-      'move_to_subevent_level1' => 'Add to Existing Event',
-      'move_to_subevent_level2' => 'Add to Subevent',
-      'move_daily_to_unsorted' => 'Move to Unsorted',
-      'move_daily_to_event' => 'Create New Event',
-      'move_daily_to_subevent_level1' => 'Add to Existing Event',
-      'move_daily_to_subevent_level2' => 'Add to Subevent',
-      'move_event_to_unsorted' => 'Move to Unsorted',
-      'move_event_to_daily' => 'Move to Daily',
-      'move_event_to_subevent_level1' => 'Move to Subevent L1',
-      'move_event_to_subevent_level2' => 'Move to Subevent L2',
-      'move_subevent1_to_unsorted' => 'Move to Unsorted',
-      'move_subevent1_to_daily' => 'Move to Daily',
-      'move_subevent1_to_event' => 'Move to Event Root',
-      'move_subevent1_to_subevent2' => 'Move to Subevent L2',
-      'move_subevent2_to_unsorted' => 'Move to Unsorted',
-      'move_subevent2_to_daily' => 'Move to Daily',
-      'move_subevent2_to_event' => 'Move to Event Root',
-      'move_subevent2_to_subevent1' => 'Move to Subevent L1'
-    }
-    
-    # Filter out transitions that would keep the medium in the same storage class
-    filtered_events = available_events.reject do |event_name|
-      case event_name.to_s
-      when 'move_to_daily'
-        medium.storage_class == 'daily'
-      when 'move_daily_to_daily', 'move_event_to_daily', 'move_subevent1_to_daily', 'move_subevent2_to_daily'
-        medium.storage_class == 'daily'
-      when 'move_to_event', 'move_daily_to_event', 'move_subevent1_to_event', 'move_subevent2_to_event'
-        medium.storage_class == 'event'
-      when 'move_to_unsorted', 'move_daily_to_unsorted', 'move_event_to_unsorted', 'move_subevent1_to_unsorted', 'move_subevent2_to_unsorted'
-        medium.storage_class == 'unsorted'
-      else
-        false
-      end
-    end
-    
-    # Build transitions array using filtered AASM data
-    transitions = []
-    filtered_events.each do |event_name|
-      label = event_labels[event_name.to_s] || event_name.humanize
-      transitions << {
-        event: event_name,
-        label: label,
-        description: "Transition to #{label}"
-      }
-    end
-    
-    transitions
-  end
-
   def get_all_transitions_with_status(medium)
     transitions = []
     
-    # Define all possible events manually since aasm.events only returns available ones
-    all_events = [
-      :move_to_daily, :move_to_event, :move_to_subevent_level1, :move_to_subevent_level2,
-      :move_daily_to_unsorted, :move_daily_to_event, :move_daily_to_subevent_level1, :move_daily_to_subevent_level2,
-      :move_event_to_unsorted, :move_event_to_daily, :move_event_to_subevent_level1, :move_event_to_subevent_level2,
-      :move_subevent1_to_unsorted, :move_subevent1_to_daily, :move_subevent1_to_event, :move_subevent1_to_subevent2,
-      :move_subevent2_to_unsorted, :move_subevent2_to_daily, :move_subevent2_to_event, :move_subevent2_to_subevent1
-    ]
-    
-    Rails.logger.debug "MediumTransitionsHelper: Checking #{all_events.length} events for medium #{medium.id}: #{all_events.inspect}"
-    
-    # Map AASM events to user-friendly labels
-    event_labels = {
-      'move_to_daily' => 'Move to Daily',
-      'move_to_event' => 'Create New Event',
-      'move_to_subevent_level1' => 'Add to Existing Event',
-      'move_to_subevent_level2' => 'Add to Subevent',
-      'move_daily_to_unsorted' => 'Move to Unsorted',
-      'move_daily_to_event' => 'Create New Event',
-      'move_daily_to_subevent_level1' => 'Add to Existing Event',
-      'move_daily_to_subevent_level2' => 'Add to Subevent',
-      'move_event_to_unsorted' => 'Move to Unsorted',
-      'move_event_to_daily' => 'Move to Daily',
-      'move_event_to_subevent_level1' => 'Move to Subevent L1',
-      'move_event_to_subevent_level2' => 'Move to Subevent L2',
-      'move_subevent1_to_unsorted' => 'Move to Unsorted',
-      'move_subevent1_to_daily' => 'Move to Daily',
-      'move_subevent1_to_event' => 'Move to Event Root',
-      'move_subevent1_to_subevent2' => 'Move to Subevent L2',
-      'move_subevent2_to_unsorted' => 'Move to Unsorted',
-      'move_subevent2_to_daily' => 'Move to Daily',
-      'move_subevent2_to_event' => 'Move to Event Root',
-      'move_subevent2_to_subevent1' => 'Move to Subevent L1'
-    }
+    # Use AASM's events to get all possible transitions dynamically
+    # We need to check all events from all states, so we query the AASM definition
+    all_events = medium.class.aasm.events.map(&:name)
     
     # Use analyze_transition method to check each event
     all_events.each do |event_name|
       analysis = medium.analyze_transition(event_name)
-      
-      Rails.logger.debug "MediumTransitionsHelper: Event #{event_name}, Analysis: #{analysis}"
       
       # Check if transition is allowed (ignoring guards)
       allowed = analysis[:allowed_transition] == true
@@ -179,12 +88,11 @@ module MediumTransitionsHelper
           event: event_name,
           available: guard_failure_reason.nil?,
           reason: guard_failure_reason,
-          label: event_labels[event_name.to_s] || event_name.to_s.humanize
+          label: event_name.to_s.humanize,  # Just humanize the event name
+          target_state: analysis[:target_state]  # Include target state
         }
       end
     end
-    
-    Rails.logger.debug "MediumTransitionsHelper: Final transitions for medium #{medium.id}: #{transitions.inspect}"
     
     transitions
   end

@@ -19,15 +19,15 @@ module MediumAasm
       end
 
       event :move_to_event do
-        transitions from: :unsorted, to: :event_root
+        transitions from: :unsorted, to: :event_root, guard: :can_move_to_event?
       end
 
       event :move_to_subevent_level1 do
-        transitions from: :unsorted, to: :subevent_level1
+        transitions from: :unsorted, to: :subevent_level1, guard: :can_move_to_subevent_level1?
       end
 
       event :move_to_subevent_level2 do
-        transitions from: :unsorted, to: :subevent_level2
+        transitions from: :unsorted, to: :subevent_level2, guard: :can_move_to_subevent_level2?
       end
 
       # From daily state
@@ -36,15 +36,15 @@ module MediumAasm
       end
 
       event :move_daily_to_event do
-        transitions from: :daily, to: :event_root
+        transitions from: :daily, to: :event_root, guard: :can_move_to_event?
       end
 
       event :move_daily_to_subevent_level1 do
-        transitions from: :daily, to: :subevent_level1
+        transitions from: :daily, to: :subevent_level1, guard: :can_move_to_subevent_level1?
       end
 
       event :move_daily_to_subevent_level2 do
-        transitions from: :daily, to: :subevent_level2
+        transitions from: :daily, to: :subevent_level2, guard: :can_move_to_subevent_level2?
       end
 
       # From event_root state
@@ -57,11 +57,11 @@ module MediumAasm
       end
 
       event :move_event_to_subevent_level1 do
-        transitions from: :event_root, to: :subevent_level1
+        transitions from: :event_root, to: :subevent_level1, guard: :can_move_to_subevent_level1?
       end
 
       event :move_event_to_subevent_level2 do
-        transitions from: :event_root, to: :subevent_level2
+        transitions from: :event_root, to: :subevent_level2, guard: :can_move_to_subevent_level2?
       end
 
       # From subevent_level1 state
@@ -74,11 +74,11 @@ module MediumAasm
       end
 
       event :move_subevent1_to_event do
-        transitions from: :subevent_level1, to: :event_root
+        transitions from: :subevent_level1, to: :event_root, guard: :can_move_to_event?
       end
 
       event :move_subevent1_to_subevent2 do
-        transitions from: :subevent_level1, to: :subevent_level2
+        transitions from: :subevent_level1, to: :subevent_level2, guard: :can_move_to_subevent_level2?
       end
 
       # From subevent_level2 state
@@ -91,17 +91,18 @@ module MediumAasm
       end
 
       event :move_subevent2_to_event do
-        transitions from: :subevent_level2, to: :event_root
+        transitions from: :subevent_level2, to: :event_root, guard: :can_move_to_event?
       end
 
       event :move_subevent2_to_subevent1 do
-        transitions from: :subevent_level2, to: :subevent_level1
+        transitions from: :subevent_level2, to: :subevent_level1, guard: :can_move_to_subevent_level1?
       end
     end
 
     # Callbacks to handle file movement and association updates
     # Only run callbacks for actual transitions, not initial state assignment
     aasm do
+      ensure_on_all_events :validate_transition_prerequisites
       after_all_transitions :handle_state_transition, if: :state_transitioned?
     end
   end
@@ -111,6 +112,56 @@ module MediumAasm
   def state_transitioned?
     # Only run callbacks if this is an actual state transition, not initial assignment
     persisted? && storage_state_changed?
+  end
+
+  def validate_transition_prerequisites
+    # Validate that required IDs are set before transitioning
+    # Use @pending_event_id and @pending_subevent_id if set (passed via instance variables)
+    event_id_to_use = @pending_event_id || event_id
+    subevent_id_to_use = @pending_subevent_id || subevent_id
+    
+    case aasm.to_state
+    when :event_root
+      if event_id_to_use.blank?
+        raise "Cannot transition to event_root state: event_id is required"
+      end
+      unless Event.exists?(id: event_id_to_use)
+        raise "Cannot transition to event_root state: event #{event_id_to_use} does not exist"
+      end
+      # Set the event_id now that we've validated it
+      self.event_id = event_id_to_use
+    when :subevent_level1
+      if subevent_id_to_use.blank?
+        raise "Cannot transition to subevent_level1 state: subevent_id is required"
+      end
+      subevent = Subevent.find_by(id: subevent_id_to_use)
+      unless subevent
+        raise "Cannot transition to subevent_level1 state: subevent #{subevent_id_to_use} does not exist"
+      end
+      unless subevent.depth == 1
+        raise "Cannot transition to subevent_level1 state: subevent #{subevent_id_to_use} is level #{subevent.depth}"
+      end
+      # Set the subevent_id and event_id now that we've validated them
+      self.subevent_id = subevent_id_to_use
+      self.event_id = subevent.event_id if event_id.blank?
+    when :subevent_level2
+      if subevent_id_to_use.blank?
+        raise "Cannot transition to subevent_level2 state: subevent_id is required"
+      end
+      subevent = Subevent.find_by(id: subevent_id_to_use)
+      unless subevent
+        raise "Cannot transition to subevent_level2 state: subevent #{subevent_id_to_use} does not exist"
+      end
+      unless subevent.depth == 2
+        raise "Cannot transition to subevent_level2 state: subevent #{subevent_id_to_use} is level #{subevent.depth}"
+      end
+      # Set the subevent_id and event_id now that we've validated them
+      self.subevent_id = subevent_id_to_use
+      self.event_id = subevent.event_id if event_id.blank?
+    end
+    # Clear instance variables after use
+    @pending_event_id = nil
+    @pending_subevent_id = nil
   end
 
   def handle_state_transition
@@ -207,40 +258,59 @@ module MediumAasm
 
   # Guard methods for AASM transitions
   def can_move_to_daily?
-    # Check if a file with the same name already exists in daily storage
-    #require_relative '../../lib/constants'
-    
-    # Calculate the target daily path
-    target_date = effective_datetime&.to_date || created_at.to_date
-    daily_path = File.join(Constants::DAILY_STORAGE, target_date.strftime("%Y/%m/%d"))
-    target_file_path = File.join(daily_path, current_filename)
-    
-    # Check if file already exists at target location
-    if File.exist?(target_file_path)
-      Rails.logger.warn "AASM Guard: Cannot move to daily - file already exists at #{target_file_path}"
-      @guard_failure_reason = "file name conflict"
+    # Check if effective datetime is available (required for daily storage)
+    if effective_datetime.blank?
+      Rails.logger.warn "AASM Guard: Cannot move to daily - no effective datetime available"
+      @guard_failure_reason = "no datetime available"
       return false
     end
     
-    Rails.logger.debug "AASM Guard: Can move to daily - no file conflict at #{target_file_path}"
+    Rails.logger.debug "AASM Guard: Can move to daily - datetime available"
     true
   end
 
   def can_move_to_unsorted?
-    # Check if a file with the same name already exists in unsorted storage
-    #require_relative '../../lib/constants'
-    
-    # Calculate the target unsorted path
-    target_file_path = File.join(Constants::UNSORTED_STORAGE, current_filename)
-    
-    # Check if file already exists at target location
-    if File.exist?(target_file_path)
-      Rails.logger.warn "AASM Guard: Cannot move to unsorted - file already exists at #{target_file_path}"
-      @guard_failure_reason = "file name conflict"
+    # Always allow moving to unsorted - the service will handle filename conflicts
+    # The FileOrganizationService will automatically append -(1), -(2) etc. if needed
+    Rails.logger.debug "AASM Guard: Can move to unsorted"
+    true
+  end
+
+  def can_move_to_event?
+    # Check if there are any events available to move to
+    if Event.count == 0
+      Rails.logger.warn "AASM Guard: Cannot move to event - no events exist"
+      @guard_failure_reason = "no events available"
       return false
     end
     
-    Rails.logger.debug "AASM Guard: Can move to unsorted - no file conflict at #{target_file_path}"
+    Rails.logger.debug "AASM Guard: Can move to event - events exist"
+    true
+  end
+
+  def can_move_to_subevent_level1?
+    # Check if there are any level 1 subevents available to move to (top-level subevents have depth 1)
+    # We need to check if any subevents have no parent (depth 1)
+    if Subevent.top_level.count == 0
+      Rails.logger.warn "AASM Guard: Cannot move to subevent level 1 - no top-level subevents exist"
+      @guard_failure_reason = "no level 1 subevents available"
+      return false
+    end
+    
+    Rails.logger.debug "AASM Guard: Can move to subevent level 1 - top-level subevents exist"
+    true
+  end
+
+  def can_move_to_subevent_level2?
+    # Check if there are any level 2 subevents available to move to (subevents with a parent have depth 2)
+    # We need to check if any subevents have a parent (depth >= 2)
+    if Subevent.where.not(parent_subevent_id: nil).count == 0
+      Rails.logger.warn "AASM Guard: Cannot move to subevent level 2 - no level 2 subevents exist"
+      @guard_failure_reason = "no level 2 subevents available"
+      return false
+    end
+    
+    Rails.logger.debug "AASM Guard: Can move to subevent level 2 - level 2 subevents exist"
     true
   end
 end

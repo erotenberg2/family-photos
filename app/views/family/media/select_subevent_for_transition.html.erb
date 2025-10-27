@@ -1,0 +1,91 @@
+<% content_for :title, "Select Subevent" %>
+
+<div class="select-subevent-form">
+  <h2>Select Subevent for Media</h2>
+  
+  <div class="media-info">
+    <p><strong>Medium:</strong> <%= @medium.original_filename %></p>
+    <p><strong>Current State:</strong> <%= @medium.aasm.current_state.to_s.humanize %></p>
+    <p><strong>Target Level:</strong> <%= @level == 1 ? "Level 1 Subevent" : "Level 2 Subevent" %></p>
+  </div>
+  
+  <% if @existing_events.empty? %>
+    <div class="alert alert-info">
+      <h4>No Events Available</h4>
+      <p>There are no existing events. Please create a new event first.</p>
+      <%= link_to "Create New Event", new_family_event_path, class: "btn btn-primary" %>
+    </div>
+  <% else %>
+    <%= form_with url: complete_transition_family_medium_path(@medium), method: :post, local: true, class: "event-form" do |form| %>
+      <div class="cascade-group" id="event-group">
+        <%= form.label :event_id, "Select Event:", class: "form-label" %>
+        <%= form.select :event_id, 
+                        options_from_collection_for_select(@existing_events, :id, :title_with_date_range),
+                        { prompt: "Choose an event..." },
+                        { class: "form-control event-selector", required: true } %>
+        <small class="form-text text-muted">
+          Select the event you want to move this media to.
+        </small>
+      </div>
+      
+      <% if @level >= 1 %>
+        <div class="cascade-group cascaded" id="subevent1-group">
+          <%= form.label :subevent_id, "Select Level 1 Subevent:", class: "form-label" %>
+          <%= form.select :subevent_id, 
+                          [],
+                          { prompt: "Choose a subevent..." },
+                          { class: "form-control subevent1-selector", required: true } %>
+          <small class="form-text text-muted">
+            Select the level 1 subevent you want to move this media to.
+          </small>
+        </div>
+      <% end %>
+      
+      <div class="form-actions">
+        <%= form.submit "Move to Subevent", class: "btn btn-primary" %>
+        <%= link_to "Cancel", family_medium_path(@medium), class: "btn btn-secondary" %>
+      </div>
+    <% end %>
+  <% end %>
+</div>
+
+<%= render partial: 'shared/form_styles' %>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const eventSelector = document.querySelector('.event-selector');
+  const subevent1Group = document.getElementById('subevent1-group');
+  const subevent1Selector = document.querySelector('.subevent1-selector');
+  
+  const eventData = <%= @existing_events.map { |e| [e.id, e.subevents.select { |s| s.depth == @level }.map { |s| [s.id, s.footer_name] }] }.to_json.html_safe %>;
+  
+  eventSelector.addEventListener('change', function() {
+    const eventId = parseInt(this.value);
+    
+    // Clear subevent options
+    if (subevent1Selector) {
+      subevent1Selector.innerHTML = '<option value="">Choose a subevent...</option>';
+    }
+    
+    if (eventId && eventData[eventId]) {
+      // Show the subevent group
+      if (subevent1Group) {
+        subevent1Group.classList.add('visible');
+        
+        // Populate subevent options
+        eventData[eventId].forEach(function(subevent) {
+          const option = document.createElement('option');
+          option.value = subevent[0];
+          option.text = subevent[1];
+          subevent1Selector.appendChild(option);
+        });
+      }
+    } else {
+      // Hide the subevent group
+      if (subevent1Group) {
+        subevent1Group.classList.remove('visible');
+      }
+    }
+  });
+});
+</script>
