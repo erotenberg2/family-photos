@@ -139,12 +139,35 @@ ActiveAdmin.register Event do
   form do |f|
     f.inputs "Event Details" do
       f.input :title
-      f.input :start_date, as: :date_picker
-      f.input :end_date, as: :date_picker
+      
+      # Only show date fields for existing events
+      if f.object.persisted?
+        f.input :start_date, as: :date_picker
+        f.input :end_date, as: :date_picker
+      end
+      
       f.input :description, as: :text
-      f.input :created_by, as: :select, collection: User.all.map { |u| [u.email, u.id] }
+      
+      # Only show created_by for existing events
+      if f.object.persisted?
+        f.input :created_by, as: :select, collection: User.all.map { |u| [u.email, u.id] }
+      end
     end
     f.actions
+  end
+  
+  # Controller to handle auto-filling dates for new events
+  controller do
+    def create
+      # Set default dates to today for new events
+      params[:event][:start_date] ||= Date.today
+      params[:event][:end_date] ||= Date.today
+      
+      # Set created_by to current user
+      params[:event][:created_by_id] = current_user.id if defined?(current_user) && current_user
+      
+      super
+    end
   end
 
   # Filters

@@ -79,8 +79,8 @@ ActiveAdmin.register Subevent, namespace: :family, as: 'Subevents' do
 
     # Media in this subevent
     panel "Media in this Subevent" do
-      if subevent.media.any?
-        table_for subevent.media.includes(:mediable, :event) do
+      if resource.media.any?
+        table_for resource.media.includes(:mediable, :event) do
           column "Thumbnail", sortable: false do |medium|
             case medium.medium_type
             when 'photo'
@@ -141,8 +141,8 @@ ActiveAdmin.register Subevent, namespace: :family, as: 'Subevents' do
 
     # Child subevents
     panel "Child Subevents" do
-      if subevent.child_subevents.any?
-        table_for subevent.child_subevents.includes(:child_subevents) do
+      if resource.child_subevents.any?
+        table_for resource.child_subevents.includes(:child_subevents) do
           column :title
           column "Media Count" do |child|
             child.media_count
@@ -157,19 +157,49 @@ ActiveAdmin.register Subevent, namespace: :family, as: 'Subevents' do
       else
         div "No child subevents.", style: "padding: 20px; color: #666; text-align: center;"
       end
+      
+      div do
+        link_to "Create Child Subevent", new_family_subevent_path(parent_subevent_id: resource.id, event_id: resource.event_id), class: "button"
+      end
     end
   end
 
   # Form configuration
   form do |f|
+    # Extract event_id from params or existing object
+    event_id = params[:event_id] || (f.object.persisted? ? f.object.event_id : nil)
+    
+    # If no event_id yet, check if the form has been submitted with event_id
+    event_id ||= params[:subevent] && params[:subevent][:event_id]
+    
+    # Extract parent_subevent_id from params or existing object
+    parent_subevent_id = params[:parent_subevent_id] || (f.object.persisted? ? f.object.parent_subevent_id : nil)
+    
+    # If no parent_subevent_id yet, check if the form has been submitted with parent_subevent_id
+    parent_subevent_id ||= params[:subevent] && params[:subevent][:parent_subevent_id]
+    
     f.inputs "Subevent Details" do
       f.input :title
-      f.input :event, as: :select, collection: Event.all.map { |e| ["#{e.title} (#{e.date_range_string})", e.id] }
-      f.input :parent_subevent, as: :select, 
-              collection: Subevent.where.not(id: f.object.id)
-                                  .select { |s| s.can_have_children? }
-                                  .map { |s| [s.hierarchy_path, s.id] },
-              include_blank: "Top Level"
+      
+      if event_id.present?
+        # Use hidden field to ensure event_id persists across form submissions
+        f.input :event_id, as: :hidden, input_html: { value: event_id }
+        div style: "margin-bottom: 15px;" do
+          "Event: #{Event.find(event_id).title}"
+        end
+      else
+        f.input :event, as: :select, collection: Event.all.map { |e| ["#{e.title} (#{e.date_range_string})", e.id] }
+      end
+      
+      if parent_subevent_id.present?
+        # Use hidden field to ensure parent_subevent_id persists across form submissions
+        f.input :parent_subevent_id, as: :hidden, input_html: { value: parent_subevent_id }
+        div style: "margin-bottom: 15px;" do
+          parent = Subevent.find(parent_subevent_id)
+          "Parent Subevent: #{parent.hierarchy_path}"
+        end
+      end
+      
       f.input :description, as: :text
     end
     f.actions

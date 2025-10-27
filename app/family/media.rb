@@ -716,14 +716,23 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
     private
 
     def generate_filename_from_datetime_and_descriptive_name(medium, descriptive_name)
-      # Use the effective datetime for the timestamp part
-      effective_datetime = medium.effective_datetime || medium.created_at
-      
-      # Format timestamp as YYYYMMDD_HHMMSS
-      timestamp = effective_datetime.strftime("%Y%m%d_%H%M%S")
+      # Extract the timestamp from the current filename (part before the first dash)
+      current_filename = medium.current_filename
       
       # Get file extension from current filename
-      extension = File.extname(medium.current_filename)
+      extension = File.extname(current_filename)
+      
+      # Get the name without extension
+      name_without_ext = File.basename(current_filename, extension)
+      
+      # Extract timestamp (part before first dash)
+      if name_without_ext.include?('-')
+        timestamp = name_without_ext.split('-').first
+      else
+        # No timestamp in current filename, use effective datetime
+        effective_datetime = medium.effective_datetime || medium.created_at
+        timestamp = effective_datetime.strftime("%Y%m%d_%H%M%S")
+      end
       
       # Create new filename: YYYYMMDD_HHMMSS-descriptive_name.extension
       "#{timestamp}-#{descriptive_name}#{extension}"
