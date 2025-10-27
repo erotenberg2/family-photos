@@ -163,29 +163,46 @@ module MediumAasm
   end
 
   def move_to_unsorted_folder
-    # TODO: Implementation for moving to unsorted/files...
-    Rails.logger.debug "AASM: Would move to unsorted folder"
+    # Implementation for moving to unsorted storage
+    FileOrganizationService.move_single_to_unsorted(self)
   end
 
   def move_to_daily_folder
-    # TODO: Implementation for moving to year/month/day/files...
-    # Use created_at or a specific date attribute
-    Rails.logger.debug "AASM: Would move to daily folder"
+    # Implementation for moving to daily storage (year/month/day)
+    FileOrganizationService.move_single_to_daily(self)
   end
 
   def move_to_event_root_folder
-    # TODO: Implementation for moving to events/event_folder_name/files...
-    Rails.logger.debug "AASM: Would move to event root folder"
+    # Implementation for moving to event root folder
+    # event_id should be set before calling this transition
+    if event_id.present?
+      FileOrganizationService.move_single_to_event(self, event_id)
+    else
+      Rails.logger.error "AASM: Cannot move to event root - no event_id set"
+      false
+    end
   end
 
   def move_to_subevent_level1_folder
-    # TODO: Implementation for moving to events/event_folder_name/subevent_folder_name/files...
-    Rails.logger.debug "AASM: Would move to subevent level 1 folder"
+    # Implementation for moving to level 1 subevent folder
+    # event_id and subevent_id should be set before calling this transition
+    if subevent_id.present?
+      FileOrganizationService.move_single_to_subevent(self, subevent_id)
+    else
+      Rails.logger.error "AASM: Cannot move to subevent level 1 - no subevent_id set"
+      false
+    end
   end
 
   def move_to_subevent_level2_folder
-    # TODO: Implementation for moving to events/event_folder_name/subevent_folder_name/subevent_folder_name/files...
-    Rails.logger.debug "AASM: Would move to subevent level 2 folder"
+    # Implementation for moving to level 2 subevent folder
+    # event_id and subevent_id should be set before calling this transition
+    if subevent_id.present?
+      FileOrganizationService.move_single_to_subevent(self, subevent_id)
+    else
+      Rails.logger.error "AASM: Cannot move to subevent level 2 - no subevent_id set"
+      false
+    end
   end
 
   # Guard methods for AASM transitions

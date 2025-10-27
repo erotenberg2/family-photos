@@ -3,7 +3,8 @@ class Event < ApplicationRecord
   has_many :media, dependent: :nullify
   has_many :subevents, dependent: :destroy
   
-  validates :title, presence: true, uniqueness: true
+  validates :title, presence: true
+  validates :title, uniqueness: { case_sensitive: false }, allow_nil: false
   validates :start_date, presence: true
   validates :end_date, presence: true
   validate :end_date_after_start_date

@@ -3,6 +3,219 @@ class FileOrganizationService
   
   class << self
     
+    # Move a single medium to unsorted storage
+    def move_single_to_unsorted(medium)
+      Rails.logger.info "FileOrganizationService: Moving medium #{medium.id} to unsorted storage"
+      
+      # Determine storage directory based on medium type
+      type_dir = File.join(Constants::UNSORTED_STORAGE, medium.medium_type.pluralize)
+      FileUtils.mkdir_p(type_dir) unless Dir.exist?(type_dir)
+      
+      # Use the current_filename from the database
+      current_filename = medium.current_filename
+      new_path = File.join(type_dir, current_filename)
+      
+      # Handle filename conflicts by adding -(1), -(2), etc. (database-based)
+      if File.exist?(new_path) || !Medium.is_filename_unique_in_database(current_filename)
+        extension = File.extname(current_filename)
+        base_name = File.basename(current_filename, extension)
+        
+        counter = 1
+        loop do
+          new_filename = "#{base_name}-(#{counter})#{extension}"
+          new_path = File.join(type_dir, new_filename)
+          
+          if !File.exist?(new_path) && Medium.is_filename_unique_in_database(new_filename)
+            current_filename = new_filename
+            Rails.logger.info "  ⚠️ Filename conflict resolved: #{medium.current_filename} -> #{new_filename}"
+            break
+          end
+          
+          counter += 1
+          break if counter > 1000 # Safety limit
+        end
+      end
+      
+      # Move the file if it exists
+      if File.exist?(medium.full_file_path)
+        # Save the old file path before moving
+        old_path = medium.file_path
+        
+        FileUtils.mv(medium.full_file_path, new_path)
+        
+        # Update the database record
+        medium.update!(file_path: type_dir, current_filename: current_filename, storage_class: 'unsorted')
+        
+        Rails.logger.info "  ✅ Moved Medium #{medium.id} to unsorted: #{new_path}"
+        
+        # Clean up empty directories in the source location
+        cleanup_empty_source_directories(old_path)
+        
+        true
+      else
+        Rails.logger.warn "  ⚠️ File not found: #{medium.full_file_path}"
+        # Still update the database record
+        medium.update!(file_path: type_dir, current_filename: current_filename, storage_class: 'unsorted')
+        false
+      end
+    rescue => e
+      Rails.logger.error "  ❌ Failed to move Medium #{medium.id} to unsorted: #{e.message}"
+      false
+    end
+    
+    # Move a single medium to daily storage
+    def move_single_to_daily(medium)
+      Rails.logger.info "FileOrganizationService: Moving medium #{medium.id} to daily storage"
+      
+      # Check if medium has valid datetime
+      unless medium.has_valid_datetime?
+        Rails.logger.error "  ❌ Medium #{medium.id} has no valid datetime"
+        return false
+      end
+      
+      # Generate new file path in daily storage
+      new_path = generate_daily_storage_path(medium)
+      
+      # Create directory if it doesn't exist
+      FileUtils.mkdir_p(File.dirname(new_path))
+      
+      # Move the file if it exists
+      if File.exist?(medium.full_file_path)
+        # Save the old file path before moving
+        old_path = medium.file_path
+        
+        FileUtils.mv(medium.full_file_path, new_path)
+        
+        # Update the database record
+        medium.update!(file_path: File.dirname(new_path), current_filename: File.basename(new_path), storage_class: 'daily')
+        
+        Rails.logger.info "  ✅ Moved Medium #{medium.id} to daily: #{new_path}"
+        
+        # Clean up empty directories in the source location
+        cleanup_empty_source_directories(old_path)
+        
+        true
+      else
+        Rails.logger.warn "  ⚠️ File not found: #{medium.full_file_path}"
+        false
+      end
+    rescue => e
+      Rails.logger.error "  ❌ Failed to move Medium #{medium.id} to daily: #{e.message}"
+      false
+    end
+    
+    # Move a single medium to event storage
+    def move_single_to_event(medium, event_id)
+      Rails.logger.info "FileOrganizationService: Moving medium #{medium.id} to event #{event_id}"
+      
+      event = Event.find(event_id)
+      
+      # Create event directory
+      event_dir = File.join(Constants::EVENTS_STORAGE, event.folder_name)
+      FileUtils.mkdir_p(event_dir) unless Dir.exist?(event_dir)
+      
+      # Create subdirectories by medium type
+      type_dir = File.join(event_dir, medium.medium_type.pluralize)
+      FileUtils.mkdir_p(type_dir) unless Dir.exist?(type_dir)
+      
+      # Use the current_filename from the database
+      current_filename = medium.current_filename
+      new_path = File.join(type_dir, current_filename)
+      
+      # Move the file if it exists
+      if File.exist?(medium.full_file_path)
+        # Save the old file path before moving
+        old_path = medium.file_path
+        
+        if medium.full_file_path == new_path
+          # File is already in the correct location, just update the database
+          medium.update!(file_path: File.dirname(new_path), current_filename: File.basename(new_path), storage_class: 'event', event_id: event_id)
+          Rails.logger.info "  ✅ File already in correct location, updated database"
+        else
+          # File needs to be moved
+          FileUtils.mv(medium.full_file_path, new_path)
+          
+          # Update the database record
+          medium.update!(file_path: File.dirname(new_path), current_filename: File.basename(new_path), storage_class: 'event', event_id: event_id)
+          
+          Rails.logger.info "  ✅ Moved Medium #{medium.id} to event: #{new_path}"
+          
+          # Clean up empty directories in the source location
+          cleanup_empty_source_directories(old_path)
+        end
+        
+        true
+      else
+        Rails.logger.warn "  ⚠️ File not found: #{medium.full_file_path}"
+        false
+      end
+    rescue => e
+      Rails.logger.error "  ❌ Failed to move Medium #{medium.id} to event: #{e.message}"
+      false
+    end
+    
+    # Move a single medium to subevent storage (for level 1 or level 2)
+    def move_single_to_subevent(medium, subevent_id)
+      Rails.logger.info "FileOrganizationService: Moving medium #{medium.id} to subevent #{subevent_id}"
+      
+      subevent = Subevent.find(subevent_id)
+      event = subevent.event
+      
+      # Determine the subevent path (handle both level 1 and level 2)
+      event_dir = File.join(Constants::EVENTS_STORAGE, event.folder_name)
+      
+      # Build subevent path based on hierarchy
+      if subevent.parent_subevent_id.present?
+        # Level 2 subevent - needs parent path
+        parent = subevent.parent_subevent
+        subevent_dir = File.join(event_dir, parent.footer_name, subevent.footer_name)
+      else
+        # Level 1 subevent
+        subevent_dir = File.join(event_dir, subevent.footer_name)
+      end
+      
+      FileUtils.mkdir_p(subevent_dir) unless Dir.exist?(subevent_dir)
+      
+      # Create subdirectories by medium type
+      type_dir = File.join(subevent_dir, medium.medium_type.pluralize)
+      FileUtils.mkdir_p(type_dir) unless Dir.exist?(type_dir)
+      
+      # Use the current_filename from the database
+      current_filename = medium.current_filename
+      new_path = File.join(type_dir, current_filename)
+      
+      # Move the file if it exists
+      if File.exist?(medium.full_file_path)
+        # Save the old file path before moving
+        old_path = medium.file_path
+        
+        if medium.full_file_path == new_path
+          # File is already in the correct location, just update the database
+          medium.update!(file_path: File.dirname(new_path), current_filename: File.basename(new_path), storage_class: 'event', event_id: event.id, subevent_id: subevent_id)
+          Rails.logger.info "  ✅ File already in correct location, updated database"
+        else
+          # File needs to be moved
+          FileUtils.mv(medium.full_file_path, new_path)
+          
+          # Update the database record
+          medium.update!(file_path: File.dirname(new_path), current_filename: File.basename(new_path), storage_class: 'event', event_id: event.id, subevent_id: subevent_id)
+          
+          Rails.logger.info "  ✅ Moved Medium #{medium.id} to subevent: #{new_path}"
+          
+          # Clean up empty directories in the source location
+          cleanup_empty_source_directories(old_path)
+        end
+        
+        true
+      else
+        Rails.logger.warn "  ⚠️ File not found: #{medium.full_file_path}"
+        false
+      end
+    rescue => e
+      Rails.logger.error "  ❌ Failed to move Medium #{medium.id} to subevent: #{e.message}"
+      false
+    end
+    
     # Move media files to daily storage based on their effective datetime
     def move_to_daily_storage(media_ids)
       # Pre-check for OS conflicts before starting the batch
@@ -114,9 +327,7 @@ class FileOrganizationService
       File.join(Constants::DAILY_STORAGE, medium.medium_type.pluralize, year, month, day, current_filename)
     end
     
-    private
-    
-    # Clean up empty directories after moving files
+    # Clean up empty directories after moving files (public so it can be called from outside)
     def cleanup_empty_source_directories(old_file_path)
       return unless old_file_path
       

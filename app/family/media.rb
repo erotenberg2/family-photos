@@ -166,15 +166,34 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
   end
 
   batch_action :move_to_daily, confirm: "Move selected media files to daily storage (organized by date)?" do |ids|
-    results = FileOrganizationService.move_to_daily_storage(ids)
+    success_count = 0
+    error_count = 0
+    errors = []
     
-    if results[:error_count] == 0
-      redirect_to collection_path, notice: "Successfully moved #{results[:success_count]} files to daily storage."
-    elsif results[:success_count] > 0
+    ids.each do |media_id|
+      begin
+        medium = Medium.find(media_id)
+        if FileOrganizationService.move_single_to_daily(medium)
+          # Trigger the state machine transition to update storage_state
+          medium.move_to_daily! if medium.may_move_to_daily?
+          success_count += 1
+        else
+          errors << "Failed to move medium #{media_id}"
+          error_count += 1
+        end
+      rescue => e
+        errors << "Error processing medium #{media_id}: #{e.message}"
+        error_count += 1
+      end
+    end
+    
+    if error_count == 0
+      redirect_to collection_path, notice: "Successfully moved #{success_count} files to daily storage."
+    elsif success_count > 0
       redirect_to collection_path, 
-                  alert: "Moved #{results[:success_count]} files, but encountered #{results[:error_count]} errors: #{results[:errors].join(', ')}"
+                  alert: "Moved #{success_count} files, but encountered #{error_count} errors: #{errors.join(', ')}"
     else
-      redirect_to collection_path, alert: "Failed to move files: #{results[:errors].join(', ')}"
+      redirect_to collection_path, alert: "Failed to move files: #{errors.join(', ')}"
     end
   end
 
@@ -307,18 +326,47 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
     event = Event.new(event_params)
     
     if event.save
-      # Clear the session
-      session[:selected_media_ids] = nil
-      
-      results = FileOrganizationService.move_to_event_storage(selected_ids, event.id)
-      
-      if results[:error_count] == 0
-        redirect_to family_event_path(event), notice: "Successfully created event '#{event.title}' and moved #{results[:success_count]} files."
-      elsif results[:success_count] > 0
-        redirect_to family_event_path(event), 
-                    alert: "Created event '#{event.title}' and moved #{results[:success_count]} files, but encountered #{results[:error_count]} errors: #{results[:errors].join(', ')}"
+      # Handle single medium transitions via state machine
+      if session[:pending_transition].present? && session[:pending_transition_medium_id].present?
+        medium = Medium.find(session[:pending_transition_medium_id])
+        pending_transition = session[:pending_transition]
+        
+        # Set the event_id before transitioning
+        medium.event_id = event.id
+        
+        # Execute the state machine transition
+        begin
+          medium.send("#{pending_transition}!")
+          
+          # Clear the session
+          session[:selected_media_ids] = nil
+          session[:pending_transition] = nil
+          session[:pending_transition_medium_id] = nil
+          
+          redirect_to family_event_path(event), notice: "Successfully created event '#{event.title}' and moved media."
+        rescue => e
+          # Clear the session
+          session[:selected_media_ids] = nil
+          session[:pending_transition] = nil
+          session[:pending_transition_medium_id] = nil
+          
+          redirect_to family_event_path(event), alert: "Created event but failed to move media: #{e.message}"
+        end
       else
-        redirect_to collection_path, alert: "Failed to create event and move files: #{results[:errors].join(', ')}"
+        # Batch operation - use FileOrganizationService
+        results = FileOrganizationService.move_to_event_storage(selected_ids, event.id)
+        
+        # Clear the session
+        session[:selected_media_ids] = nil
+        
+        if results[:error_count] == 0
+          redirect_to family_event_path(event), notice: "Successfully created event '#{event.title}' and moved #{results[:success_count]} files."
+        elsif results[:success_count] > 0
+          redirect_to family_event_path(event), 
+                      alert: "Created event '#{event.title}' and moved #{results[:success_count]} files, but encountered #{results[:error_count]} errors: #{results[:errors].join(', ')}"
+        else
+          redirect_to collection_path, alert: "Failed to create event and move files: #{results[:errors].join(', ')}"
+        end
       end
     else
       # Show validation errors and let user try again
@@ -366,18 +414,47 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
     begin
       event = Event.find(event_id)
       
-      results = FileOrganizationService.move_to_event_storage(selected_ids, event.id)
-      
-      # Clear the session
-      session[:selected_media_ids_for_existing] = nil
-      
-      if results[:error_count] == 0
-        redirect_to family_event_path(event), notice: "Successfully added #{results[:success_count]} files to event '#{event.title}'."
-      elsif results[:success_count] > 0
-        redirect_to family_event_path(event), 
-                    alert: "Added #{results[:success_count]} files to event '#{event.title}', but encountered #{results[:error_count]} errors: #{results[:errors].join(', ')}"
+      # Handle single medium transitions via state machine
+      if session[:pending_transition].present? && session[:pending_transition_medium_id].present?
+        medium = Medium.find(session[:pending_transition_medium_id])
+        pending_transition = session[:pending_transition]
+        
+        # Set the event_id before transitioning
+        medium.event_id = event.id
+        
+        # Execute the state machine transition
+        begin
+          medium.send("#{pending_transition}!")
+          
+          # Clear the session
+          session[:selected_media_ids_for_existing] = nil
+          session[:pending_transition] = nil
+          session[:pending_transition_medium_id] = nil
+          
+          redirect_to family_event_path(event), notice: "Successfully moved media to event '#{event.title}'."
+        rescue => e
+          # Clear the session
+          session[:selected_media_ids_for_existing] = nil
+          session[:pending_transition] = nil
+          session[:pending_transition_medium_id] = nil
+          
+          redirect_to family_event_path(event), alert: "Failed to move media to event: #{e.message}"
+        end
       else
-        redirect_to collection_path, alert: "Failed to add files to event: #{results[:errors].join(', ')}"
+        # Batch operation - use FileOrganizationService
+        results = FileOrganizationService.move_to_event_storage(selected_ids, event.id)
+        
+        # Clear the session
+        session[:selected_media_ids_for_existing] = nil
+        
+        if results[:error_count] == 0
+          redirect_to family_event_path(event), notice: "Successfully added #{results[:success_count]} files to event '#{event.title}'."
+        elsif results[:success_count] > 0
+          redirect_to family_event_path(event), 
+                      alert: "Added #{results[:success_count]} files to event '#{event.title}', but encountered #{results[:error_count]} errors: #{results[:errors].join(', ')}"
+        else
+          redirect_to collection_path, alert: "Failed to add files to event: #{results[:errors].join(', ')}"
+        end
       end
     rescue ActiveRecord::RecordNotFound
       redirect_to add_to_existing_event_family_media_path, alert: "Selected event not found."
@@ -877,15 +954,42 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
   member_action :execute_transition, method: :patch do
     transition_event = params[:transition]
     
-    if resource.respond_to?(transition_event)
+    # Handle event-related transitions that need user input
+    event_transitions = ['move_to_event', 'move_to_subevent_level1', 'move_to_subevent_level2',
+                         'move_daily_to_event', 'move_daily_to_subevent_level1', 'move_daily_to_subevent_level2',
+                         'move_event_to_subevent_level1', 'move_event_to_subevent_level2',
+                         'move_subevent1_to_subevent2', 'move_subevent2_to_subevent1']
+    
+    if event_transitions.include?(transition_event)
+      # For event transitions, we need to create/show a dialog
+      # Store the transition in session and redirect to appropriate action
+      session[:pending_transition] = transition_event
+      session[:pending_transition_medium_id] = resource.id
+      
+      case transition_event
+      when 'move_to_event', 'move_daily_to_event', 'move_subevent1_to_event', 'move_subevent2_to_event'
+        # Create new event - redirect to event creation form
+        session[:selected_media_ids] = [resource.id]
+        redirect_to new_event_from_media_family_media_path
+      when 'move_to_subevent_level1', 'move_daily_to_subevent_level1', 'move_event_to_subevent_level1', 'move_subevent2_to_subevent1'
+        # Add to existing event - redirect to event selection
+        session[:selected_media_ids_for_existing] = [resource.id]
+        redirect_to add_to_existing_event_family_media_path
+      when 'move_to_subevent_level2', 'move_daily_to_subevent_level2', 'move_event_to_subevent_level2', 'move_subevent1_to_subevent2'
+        # Add to subevent - redirect to event selection (for now, same as adding to event)
+        session[:selected_media_ids_for_existing] = [resource.id]
+        redirect_to add_to_existing_event_family_media_path
+      end
+    elsif resource.respond_to?(transition_event)
+      # For non-event transitions, execute directly
       begin
         resource.send("#{transition_event}!")
-        redirect_to family_media_path, notice: "Successfully moved media to #{transition_event.humanize}"
+        redirect_to family_medium_path(resource), notice: "Successfully moved media to #{transition_event.humanize}"
       rescue => e
-        redirect_to family_media_path, alert: "Failed to move media: #{e.message}"
+        redirect_to family_medium_path(resource), alert: "Failed to move media: #{e.message}"
       end
     else
-      redirect_to family_media_path, alert: "Invalid transition: #{transition_event}"
+      redirect_to family_medium_path(resource), alert: "Invalid transition: #{transition_event}"
     end
   end
 
