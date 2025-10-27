@@ -41,6 +41,19 @@
         </div>
       <% end %>
       
+      <% if @level >= 2 %>
+        <div class="cascade-group cascaded" id="subevent2-group">
+          <%= form.label :subevent2_id, "Select Level 2 Subevent:", class: "form-label" %>
+          <%= form.select :subevent2_id, 
+                          [],
+                          { prompt: "Choose a level 2 subevent..." },
+                          { class: "form-control subevent2-selector", required: true } %>
+          <small class="form-text text-muted">
+            Select the level 2 subevent you want to move this media to.
+          </small>
+        </div>
+      <% end %>
+      
       <div class="form-actions">
         <%= form.submit "Move to Subevent", class: "btn btn-primary" %>
         <%= link_to "Cancel", family_medium_path(@medium), class: "btn btn-secondary" %>
@@ -56,24 +69,34 @@ document.addEventListener('DOMContentLoaded', function() {
   const eventSelector = document.querySelector('.event-selector');
   const subevent1Group = document.getElementById('subevent1-group');
   const subevent1Selector = document.querySelector('.subevent1-selector');
+  const subevent2Group = document.getElementById('subevent2-group');
+  const subevent2Selector = document.querySelector('.subevent2-selector');
   
-  const eventData = <%= @existing_events.map { |e| [e.id, e.subevents.select { |s| s.depth == @level }.map { |s| [s.id, s.footer_name] }] }.to_json.html_safe %>;
+  // Event data with level 1 subevents
+  const eventDataLevel1 = <%= @existing_events.map { |e| [e.id, e.subevents.select { |s| s.depth == 1 }.map { |s| [s.id, s.footer_name] }] }.to_h.to_json.html_safe %>;
+  
+  // Level 1 subevent data with their level 2 children
+  // depth is a method, not a column, so we use top_level scope and filter by depth method
+  const subevent1Data = <%= Subevent.top_level.select { |s| s.depth == 1 }.map { |s| [s.id, s.child_subevents.map { |c| [c.id, c.footer_name] }] }.to_h.to_json.html_safe %>;
   
   eventSelector.addEventListener('change', function() {
     const eventId = parseInt(this.value);
     
-    // Clear subevent options
+    // Clear all subevent options
     if (subevent1Selector) {
       subevent1Selector.innerHTML = '<option value="">Choose a subevent...</option>';
     }
+    if (subevent2Selector) {
+      subevent2Selector.innerHTML = '<option value="">Choose a level 2 subevent...</option>';
+    }
     
-    if (eventId && eventData[eventId]) {
-      // Show the subevent group
+    if (eventId && eventDataLevel1[eventId]) {
+      // Show the level 1 subevent group
       if (subevent1Group) {
         subevent1Group.classList.add('visible');
         
-        // Populate subevent options
-        eventData[eventId].forEach(function(subevent) {
+        // Populate level 1 subevent options
+        eventDataLevel1[eventId].forEach(function(subevent) {
           const option = document.createElement('option');
           option.value = subevent[0];
           option.text = subevent[1];
@@ -81,11 +104,45 @@ document.addEventListener('DOMContentLoaded', function() {
         });
       }
     } else {
-      // Hide the subevent group
+      // Hide all subevent groups
       if (subevent1Group) {
         subevent1Group.classList.remove('visible');
       }
+      if (subevent2Group) {
+        subevent2Group.classList.remove('visible');
+      }
     }
   });
+  
+  // Level 1 subevent selector change handler
+  if (subevent1Selector) {
+    subevent1Selector.addEventListener('change', function() {
+      const subevent1Id = parseInt(this.value);
+      
+      if (subevent2Selector) {
+        subevent2Selector.innerHTML = '<option value="">Choose a level 2 subevent...</option>';
+      }
+      
+      if (subevent1Id && subevent1Data[subevent1Id] && subevent1Data[subevent1Id].length > 0) {
+        // Show the level 2 subevent group
+        if (subevent2Group) {
+          subevent2Group.classList.add('visible');
+          
+          // Populate level 2 subevent options
+          subevent1Data[subevent1Id].forEach(function(subevent) {
+            const option = document.createElement('option');
+            option.value = subevent[0];
+            option.text = subevent[1];
+            subevent2Selector.appendChild(option);
+          });
+        }
+      } else {
+        // Hide the level 2 subevent group
+        if (subevent2Group) {
+          subevent2Group.classList.remove('visible');
+        }
+      }
+    });
+  }
 });
 </script>

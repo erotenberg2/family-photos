@@ -19,14 +19,23 @@ module MediumAasm
       end
 
       event :move_to_event do
+        before do
+          validate_to_events_transitions
+        end
         transitions from: :unsorted, to: :event_root, guard: :can_move_to_event?
       end
 
       event :move_to_subevent_level1 do
+        before do
+          validate_to_events_transitions
+        end
         transitions from: :unsorted, to: :subevent_level1, guard: :can_move_to_subevent_level1?
       end
 
       event :move_to_subevent_level2 do
+        before do
+          validate_to_events_transitions
+        end
         transitions from: :unsorted, to: :subevent_level2, guard: :can_move_to_subevent_level2?
       end
 
@@ -36,14 +45,23 @@ module MediumAasm
       end
 
       event :move_daily_to_event do
+        before do
+          validate_to_events_transitions
+        end
         transitions from: :daily, to: :event_root, guard: :can_move_to_event?
       end
 
       event :move_daily_to_subevent_level1 do
+        before do
+          validate_to_events_transitions
+        end
         transitions from: :daily, to: :subevent_level1, guard: :can_move_to_subevent_level1?
       end
 
       event :move_daily_to_subevent_level2 do
+        before do
+          validate_to_events_transitions
+        end
         transitions from: :daily, to: :subevent_level2, guard: :can_move_to_subevent_level2?
       end
 
@@ -57,10 +75,16 @@ module MediumAasm
       end
 
       event :move_event_to_subevent_level1 do
+        before do
+          validate_to_events_transitions
+        end
         transitions from: :event_root, to: :subevent_level1, guard: :can_move_to_subevent_level1?
       end
 
       event :move_event_to_subevent_level2 do
+        before do
+          validate_to_events_transitions
+        end
         transitions from: :event_root, to: :subevent_level2, guard: :can_move_to_subevent_level2?
       end
 
@@ -78,6 +102,9 @@ module MediumAasm
       end
 
       event :move_subevent1_to_subevent2 do
+        before do
+          validate_to_events_transitions
+        end
         transitions from: :subevent_level1, to: :subevent_level2, guard: :can_move_to_subevent_level2?
       end
 
@@ -102,7 +129,6 @@ module MediumAasm
     # Callbacks to handle file movement and association updates
     # Only run callbacks for actual transitions, not initial state assignment
     aasm do
-      ensure_on_all_events :validate_transition_prerequisites
       after_all_transitions :handle_state_transition, if: :state_transitioned?
     end
   end
@@ -114,59 +140,61 @@ module MediumAasm
     persisted? && storage_state_changed?
   end
 
-  def validate_transition_prerequisites
+  def validate_to_events_transitions
+    Rails.logger.info "=== VALIDATE TO EVENTS TRANSITIONS ==="
+    Rails.logger.info "@pending_event_id: #{@pending_event_id.inspect}"
+    Rails.logger.info "@pending_subevent_id: #{@pending_subevent_id.inspect}"
+    Rails.logger.info "current event_id: #{event_id.inspect}"
+    Rails.logger.info "current subevent_id: #{subevent_id.inspect}"
+    
     # Validate that required IDs are set before transitioning
     # Use @pending_event_id and @pending_subevent_id if set (passed via instance variables)
     event_id_to_use = @pending_event_id || event_id
     subevent_id_to_use = @pending_subevent_id || subevent_id
     
-    case aasm.to_state
-    when :event_root
-      if event_id_to_use.blank?
-        raise "Cannot transition to event_root state: event_id is required"
-      end
+    Rails.logger.info "aasm.to_state: #{aasm.to_state.inspect} (class: #{aasm.to_state.class})"
+    
+    # In a before callback, aasm.to_state is nil, so we determine the target state
+    # based on which parameters are provided
+    if event_id_to_use.present? && subevent_id_to_use.blank?
+      # Moving to event_root
+      Rails.logger.info "Moving to event_root with event_id: #{event_id_to_use}"
       unless Event.exists?(id: event_id_to_use)
         raise "Cannot transition to event_root state: event #{event_id_to_use} does not exist"
       end
       # Set the event_id now that we've validated it
       self.event_id = event_id_to_use
-    when :subevent_level1
-      if subevent_id_to_use.blank?
-        raise "Cannot transition to subevent_level1 state: subevent_id is required"
-      end
+      Rails.logger.info "After setting event_id, self.event_id: #{self.event_id.inspect}"
+    elsif subevent_id_to_use.present?
       subevent = Subevent.find_by(id: subevent_id_to_use)
       unless subevent
-        raise "Cannot transition to subevent_level1 state: subevent #{subevent_id_to_use} does not exist"
-      end
-      unless subevent.depth == 1
-        raise "Cannot transition to subevent_level1 state: subevent #{subevent_id_to_use} is level #{subevent.depth}"
+        raise "Cannot transition to subevent state: subevent #{subevent_id_to_use} does not exist"
       end
       # Set the subevent_id and event_id now that we've validated them
       self.subevent_id = subevent_id_to_use
       self.event_id = subevent.event_id if event_id.blank?
-    when :subevent_level2
-      if subevent_id_to_use.blank?
-        raise "Cannot transition to subevent_level2 state: subevent_id is required"
-      end
-      subevent = Subevent.find_by(id: subevent_id_to_use)
-      unless subevent
-        raise "Cannot transition to subevent_level2 state: subevent #{subevent_id_to_use} does not exist"
-      end
-      unless subevent.depth == 2
-        raise "Cannot transition to subevent_level2 state: subevent #{subevent_id_to_use} is level #{subevent.depth}"
-      end
-      # Set the subevent_id and event_id now that we've validated them
-      self.subevent_id = subevent_id_to_use
-      self.event_id = subevent.event_id if event_id.blank?
+      Rails.logger.info "Set subevent_id: #{subevent_id_to_use} (depth: #{subevent.depth}), event_id: #{subevent.event_id}"
+    else
+      Rails.logger.info "No case matched - event_id_to_use: #{event_id_to_use.inspect}, subevent_id_to_use: #{subevent_id_to_use.inspect}"
     end
     # Clear instance variables after use
+    Rails.logger.info "At end of validate_to_events_transitions, event_id: #{event_id.inspect}"
+    Rails.logger.info "At end of validate_to_events_transitions, subevent_id: #{subevent_id.inspect}"
     @pending_event_id = nil
     @pending_subevent_id = nil
+    Rails.logger.info "=== END VALIDATE TO EVENTS TRANSITIONS ==="
   end
 
   def handle_state_transition
+    Rails.logger.info "=== HANDLE STATE TRANSITION ==="
+    Rails.logger.info "From: #{aasm.from_state}, To: #{aasm.to_state}"
+    Rails.logger.info "event_id: #{event_id.inspect}, subevent_id: #{subevent_id.inspect}"
+    Rails.logger.info "storage_state_changed?: #{storage_state_changed?}"
+    
     move_file_to_new_location
     update_associations
+    
+    Rails.logger.info "=== END HANDLE STATE TRANSITION ==="
   end
 
   def move_file_to_new_location
@@ -226,8 +254,13 @@ module MediumAasm
   def move_to_event_root_folder
     # Implementation for moving to event root folder
     # event_id should be set before calling this transition
+    Rails.logger.info "move_to_event_root_folder called"
+    Rails.logger.info "event_id: #{event_id.inspect}"
+    
     if event_id.present?
-      FileOrganizationService.move_single_to_event(self, event_id)
+      result = FileOrganizationService.move_single_to_event(self, event_id)
+      Rails.logger.info "move_single_to_event result: #{result}"
+      result
     else
       Rails.logger.error "AASM: Cannot move to event root - no event_id set"
       false

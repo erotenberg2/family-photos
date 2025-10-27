@@ -987,13 +987,13 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
     case target_state.to_s
     when 'event_root'
       # Need to select an event
-      redirect_to select_event_for_transition_family_media_path(id: resource.id)
+      redirect_to select_event_for_transition_family_medium_path(id: resource.id)
     when 'subevent_level1'
       # Need to select event and subevent level 1
-      redirect_to select_subevent_for_transition_family_media_path(id: resource.id, level: 1)
+      redirect_to select_subevent_for_transition_family_medium_path(id: resource.id, level: 1)
     when 'subevent_level2'
       # Need to select event, subevent level 1, and subevent level 2
-      redirect_to select_subevent_for_transition_family_media_path(id: resource.id, level: 2)
+      redirect_to select_subevent_for_transition_family_medium_path(id: resource.id, level: 2)
     else
       # Direct transitions (unsorted, daily) - execute immediately
       begin
@@ -1023,7 +1023,8 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
     end
     
     event_id = params[:event_id]
-    subevent_id = params[:subevent_id]
+    # For level 2 subevents, the parameter is subevent2_id, for level 1 it's subevent_id
+    subevent_id = params[:subevent2_id] || params[:subevent_id]
     
     # Set instance variables for the AASM callback to validate and use
     @medium.instance_variable_set(:@pending_event_id, event_id) if event_id.present?
