@@ -16,7 +16,7 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
   # Index page configuration
   index do 
     selectable_column
-    
+    column :id
     column "Thumbnail", sortable: false do |medium|
       link_to family_medium_path(medium) do
         case medium.medium_type

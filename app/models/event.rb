@@ -36,6 +36,19 @@ class Event < ApplicationRecord
     "#{title} (#{date_range_string})"
   end
   
+  # All media belonging to this event, including media in the entire subevent tree
+  def all_media
+    # Start with media directly under the event
+    collected_ids = media.pluck(:id)
+    
+    # Recursively gather media from all subevents
+    subevents.find_each do |sub|
+      collected_ids.concat(sub.all_media.pluck(:id))
+    end
+    
+    Medium.where(id: collected_ids.uniq)
+  end
+  
   def folder_name
     # Use parameterize for the date part but preserve the original case for the title
     date_part = "#{start_date.strftime('%Y-%m-%d')}_to_#{end_date.strftime('%Y-%m-%d')}"
@@ -51,17 +64,39 @@ class Event < ApplicationRecord
     subevents.count
   end
   
-  # Update date range based on associated media
+  # Update date range based on associated media (using medium.effective_datetime only)
   def update_date_range_from_media!
     return if media.empty?
     
-    dates = media.pluck(:datetime_user, :datetime_intrinsic, :datetime_inferred, :created_at).flatten.compact
+    dates = media.map(&:effective_datetime).compact
     return if dates.empty?
     
     earliest_date = dates.min.to_date
     latest_date = dates.max.to_date
     
     update!(start_date: earliest_date, end_date: latest_date) if earliest_date != start_date || latest_date != end_date
+  end
+  
+  # Update start/end using ALL media (event + entire subevent tree), using effective_datetime only
+  def recalculate_date_range_from_all_media!
+    scope = all_media
+    return if scope.blank?
+    
+    dates = scope.map(&:effective_datetime).compact
+    return if dates.empty?
+    
+    earliest_date = dates.min.to_date
+    latest_date = dates.max.to_date
+    
+    changed = false
+    if earliest_date != start_date || latest_date != end_date
+      update!(start_date: earliest_date, end_date: latest_date)
+      changed = true
+    end
+    
+    # Ensure folder path matches folder_name even if only the dates changed
+    ensure_folder_path_matches_folder_name!
+    changed
   end
   
   # Ransackable attributes for ActiveAdmin filtering
@@ -172,6 +207,39 @@ class Event < ApplicationRecord
     end
     
     Rails.logger.info "=== END EVENT FOLDER RENAME CALLBACK ==="
+  end
+  
+  # Public version of the folder rename that can be called when dates change
+  def ensure_folder_path_matches_folder_name!
+    return unless start_date && end_date
+    
+    require_relative '../../lib/constants'
+    
+    current_folder_name = folder_path.presence || folder_name
+    old_path = File.join(Constants::EVENTS_STORAGE, current_folder_name)
+    new_folder_name = folder_name
+    new_path = File.join(Constants::EVENTS_STORAGE, new_folder_name)
+    
+    Rails.logger.info "Ensuring event folder name matches: '#{new_folder_name}' (current: '#{current_folder_name}')"
+    
+    begin
+      if Dir.exist?(old_path) && old_path != new_path
+        FileUtils.mv(old_path, new_path)
+        update_column(:folder_path, new_folder_name)
+        update_media_file_paths_improved(new_folder_name)
+        Rails.logger.info "✅ Event folder renamed to: #{new_folder_name}"
+      elsif Dir.exist?(new_path)
+        # Already at correct name; ensure DB value matches
+        update_column(:folder_path, new_folder_name) if folder_path != new_folder_name
+      else
+        # Neither path exists; create the expected path
+        FileUtils.mkdir_p(new_path)
+        update_column(:folder_path, new_folder_name)
+        Rails.logger.info "Created event folder at: #{new_path}"
+      end
+    rescue => e
+      Rails.logger.error "Failed to ensure folder name: #{e.message}"
+    end
   end
   
   def update_media_file_paths(old_folder_name, new_folder_name)

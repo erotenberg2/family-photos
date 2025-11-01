@@ -176,6 +176,9 @@ module MediumAasm
       
       # AFTER state change: Update associations
       after_all_transitions :update_associations, if: :state_transitioned?
+      
+      # AFTER state change: Refresh event date range and folder naming
+      after_all_transitions :refresh_event_dates_and_folder, if: :state_transitioned?
     end
   end
 
@@ -194,6 +197,12 @@ module MediumAasm
     require_relative '../../../lib/constants'
     
     begin
+      Rails.logger.info "---- now moving: medium #{id} (#{current_filename})"
+      Rails.logger.info "from_state=#{aasm.current_state} target_state=#{target_state} storage_class=#{storage_class}"
+      Rails.logger.info "source_path=#{full_file_path} exists=#{full_file_path.present? && File.exist?(full_file_path)}"
+      # Capture previous event context before any association changes
+      @previous_event_id = event_id if instance_variable_get(:@previous_event_id).nil?
+      
       case target_state
       when :unsorted
         move_file_to_unsorted
@@ -201,6 +210,7 @@ module MediumAasm
         move_file_to_daily
       when :event_root
         if event_id.present?
+          Rails.logger.info "event_id present=#{event_id} event_folder=#{event&.folder_name}"
           move_file_to_event
         else
           Rails.logger.error "Cannot move to event - no event_id set"
@@ -208,6 +218,7 @@ module MediumAasm
         end
       when :subevent_level1, :subevent_level2
         if subevent_id.present?
+          Rails.logger.info "subevent_id present=#{subevent_id} subevent_depth=#{subevent&.depth}"
           move_file_to_subevent
         else
           Rails.logger.error "Cannot move to subevent - no subevent_id set"
@@ -226,23 +237,78 @@ module MediumAasm
   
   # Move file to unsorted (only moves file, doesn't update DB)
   def move_file_to_unsorted
+    # Ensure we have fresh DB values in case the event folder was renamed mid-batch
+    reload
     old_path = file_path  # Save old path for cleanup
-    new_path = File.join(Constants::UNSORTED_STORAGE, current_filename)
-    FileUtils.mkdir_p(Constants::UNSORTED_STORAGE) unless Dir.exist?(Constants::UNSORTED_STORAGE)
+    source_path = full_file_path
+    dest_dir = Constants::UNSORTED_STORAGE
     
-    if File.exist?(full_file_path) && full_file_path != new_path
-      FileUtils.mv(full_file_path, new_path)
-      # Update in-memory attributes (will be saved by AASM)
-      self.file_path = Constants::UNSORTED_STORAGE
-      Rails.logger.info "✅ Moved file to: #{new_path}"
+    FileUtils.mkdir_p(dest_dir) unless Dir.exist?(dest_dir)
+    
+    unless source_path && File.exist?(source_path)
+      Rails.logger.warn "⚠️ move_file_to_unsorted: source missing at expected path, attempting fallback search. expected=#{source_path}"
+      # Try to find by filename anywhere under storage roots
+      candidates = Medium.search_for_file(current_filename)
+      if candidates.any?
+        source_path = candidates.first
+        old_path = File.dirname(source_path)
+        Rails.logger.info "✅ Fallback found source at: #{source_path}"
+      else
+        Rails.logger.error "❌ move_file_to_unsorted: source file not found anywhere for #{current_filename}"
+        return false
+      end
+    end
+    
+    # Resolve destination filename conflicts (OS and DB) without touching the database yet
+    dest_filename = current_filename
+    dest_path = File.join(dest_dir, dest_filename)
+    db_conflict = Medium.where.not(id: id).where("LOWER(current_filename) = ?", dest_filename.downcase).exists?
+    Rails.logger.info "unsorted: initial_dest=#{dest_path} exists_os=#{File.exist?(dest_path)} db_conflict=#{db_conflict}"
+    
+    if File.exist?(dest_path) || Medium.where.not(id: id).where("LOWER(current_filename) = ?", dest_filename.downcase).exists?
+      extension = File.extname(dest_filename)
+      base_name = File.basename(dest_filename, extension)
       
+      # Detect existing -(N) suffix and increment
+      suffix_match = base_name.match(/-\((\d+)\)$/)
+      counter = suffix_match ? suffix_match[1].to_i + 1 : 1
+      base_core = suffix_match ? base_name.sub(/-\(\d+\)$/, '') : base_name
+      
+      loop do
+        candidate = "#{base_core}-(#{counter})#{extension}"
+        candidate_path = File.join(dest_dir, candidate)
+        db_exists = Medium.where.not(id: id).where("LOWER(current_filename) = ?", candidate.downcase).exists?
+        Rails.logger.info "unsorted: try_candidate=#{candidate_path} exists_os=#{File.exist?(candidate_path)} db_conflict=#{db_exists}"
+        if !File.exist?(candidate_path) && !db_exists
+          dest_filename = candidate
+          dest_path = candidate_path
+          break
+        end
+        counter += 1
+        break if counter > 1000
+      end
+    end
+    
+    # Perform move
+    begin
+      Rails.logger.info "unsorted: moving #{source_path} -> #{dest_path}"
+      if source_path == dest_path
+        # Already correct location
+        self.file_path = dest_dir
+        Rails.logger.info "✅ File already at unsorted: #{dest_path}"
+        return true
+      end
+      FileUtils.mv(source_path, dest_path)
+      # Update in-memory attributes (persisted after transition)
+      self.file_path = dest_dir
+      self.current_filename = File.basename(dest_path)
+      Rails.logger.info "✅ Moved file to unsorted: #{dest_path}"
       # Clean up empty directories in source location
       cleanup_empty_directories(old_path)
       true
-    else
-      Rails.logger.warn "File already at destination or doesn't exist"
-      self.file_path = Constants::UNSORTED_STORAGE
-      true
+    rescue => e
+      Rails.logger.error "❌ Failed to move to unsorted: #{e.message}"
+      false
     end
   end
   
@@ -264,7 +330,9 @@ module MediumAasm
     
     FileUtils.mkdir_p(daily_dir) unless Dir.exist?(daily_dir)
     
+    Rails.logger.info "daily: dest_dir=#{daily_dir} dest_path=#{new_path}"
     if File.exist?(full_file_path) && full_file_path != new_path
+      Rails.logger.info "daily: moving #{full_file_path} -> #{new_path}"
       FileUtils.mv(full_file_path, new_path)
       # Update in-memory attributes (will be saved by AASM)
       self.file_path = daily_dir
@@ -274,7 +342,12 @@ module MediumAasm
       cleanup_empty_directories(old_path)
       true
     else
-      Rails.logger.warn "File already at destination or doesn't exist"
+      unless File.exist?(full_file_path)
+        Rails.logger.error "❌ move_file_to_daily: source file missing: #{full_file_path}"
+        return false
+      end
+      Rails.logger.info "daily: already at destination #{new_path}"
+      # Already at destination
       self.file_path = daily_dir
       true
     end
@@ -288,7 +361,9 @@ module MediumAasm
     
     FileUtils.mkdir_p(event_dir) unless Dir.exist?(event_dir)
     
+    Rails.logger.info "event: dest_dir=#{event_dir} dest_path=#{new_path}"
     if File.exist?(full_file_path) && full_file_path != new_path
+      Rails.logger.info "event: moving #{full_file_path} -> #{new_path}"
       FileUtils.mv(full_file_path, new_path)
       # Update in-memory attributes (will be saved by AASM)
       self.file_path = event_dir
@@ -298,7 +373,12 @@ module MediumAasm
       cleanup_empty_directories(old_path)
       true
     else
-      Rails.logger.warn "File already at destination or doesn't exist"
+      unless File.exist?(full_file_path)
+        Rails.logger.error "❌ move_file_to_event: source file missing: #{full_file_path}"
+        return false
+      end
+      Rails.logger.info "event: already at destination #{new_path}"
+      # Already at destination
       self.file_path = event_dir
       true
     end
@@ -322,7 +402,9 @@ module MediumAasm
     
     FileUtils.mkdir_p(subevent_dir) unless Dir.exist?(subevent_dir)
     
+    Rails.logger.info "subevent: dest_dir=#{subevent_dir} dest_path=#{new_path}"
     if File.exist?(full_file_path) && full_file_path != new_path
+      Rails.logger.info "subevent: moving #{full_file_path} -> #{new_path}"
       FileUtils.mv(full_file_path, new_path)
       # Update in-memory attributes (will be saved by AASM)
       self.file_path = subevent_dir
@@ -332,7 +414,12 @@ module MediumAasm
       cleanup_empty_directories(old_path)
       true
     else
-      Rails.logger.warn "File already at destination or doesn't exist"
+      unless File.exist?(full_file_path)
+        Rails.logger.error "❌ move_file_to_subevent: source file missing: #{full_file_path}"
+        return false
+      end
+      Rails.logger.info "subevent: already at destination #{new_path}"
+      # Already at destination
       self.file_path = subevent_dir
       true
     end
@@ -491,6 +578,27 @@ module MediumAasm
       self.storage_class = :daily
     when :event_root, :subevent_level1, :subevent_level2
       self.storage_class = :event
+    end
+  end
+
+  # After a transition, recompute event date ranges and ensure folder names match
+  def refresh_event_dates_and_folder
+    begin
+      # Destination event (if any)
+      if event_id.present? && event
+        event.recalculate_date_range_from_all_media!
+      end
+      
+      # Origin event (if moved away)
+      if @previous_event_id.present? && @previous_event_id != event_id
+        if (prev = Event.find_by(id: @previous_event_id))
+          prev.recalculate_date_range_from_all_media!
+        end
+      end
+    rescue => e
+      Rails.logger.error "Failed to refresh event dates/folder: #{e.message}"
+    ensure
+      @previous_event_id = nil
     end
   end
 

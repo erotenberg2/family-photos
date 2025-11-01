@@ -23,7 +23,7 @@ class Medium < ApplicationRecord
   }
   
   # Validations for generic media attributes
-  validates :file_path, presence: true
+  # TODO: file_path is being deprecated in favor of computed paths
   validates :current_filename, presence: true, uniqueness: true
   validates :md5_hash, presence: true, uniqueness: true
   validates :file_size, presence: true, numericality: { greater_than: 0 }
@@ -51,6 +51,17 @@ class Medium < ApplicationRecord
   # Callbacks for file operations
   before_update :rename_file_on_disk, if: :current_filename_changed?
   after_update :rename_file_if_datetime_changed, if: :effective_datetime_changed?
+  
+  # Scopes
+  scope :by_date, -> { order(:datetime_user, :datetime_intrinsic, :datetime_inferred, :created_at) }
+  scope :recent, -> { order(created_at: :desc) }
+  scope :by_type, ->(type) { where(medium_type: type) }
+  scope :with_event, -> { where.not(event_id: nil) }
+  scope :without_event, -> { where(event_id: nil) }
+  scope :by_event, ->(event_id) { where(event_id: event_id) }
+  scope :photos, -> { where(medium_type: 'photo') }
+  scope :audio, -> { where(medium_type: 'audio') }
+  scope :video, -> { where(medium_type: 'video') }
 
   # Virtual attribute for filename editing
   attr_accessor :descriptive_name
@@ -79,7 +90,7 @@ class Medium < ApplicationRecord
 
   def self.ransackable_attributes(auth_object = nil)
     ["client_file_path", "content_type", "created_at", "current_filename", "datetime_inferred", "datetime_intrinsic", "datetime_source_last_modified", 
-     "datetime_user", "event_id", "file_path", "file_size", "id", "latitude", "longitude", "md5_hash", "medium_type", "original_filename", 
+     "datetime_user", "event_id", "file_size", "id", "latitude", "longitude", "md5_hash", "medium_type", "original_filename", 
      "storage_class", "subevent_id", "updated_at", "uploaded_by_id", "user_id"]
   end
 
@@ -286,16 +297,6 @@ class Medium < ApplicationRecord
     { fixed: fixed_count, unfixable: unfixable_count }
   end
 
-  # Scopes
-  scope :by_date, -> { order(:datetime_user, :datetime_intrinsic, :datetime_inferred, :created_at) }
-  scope :recent, -> { order(created_at: :desc) }
-  scope :by_type, ->(type) { where(medium_type: type) }
-  scope :with_event, -> { where.not(event_id: nil) }
-  scope :without_event, -> { where(event_id: nil) }
-  scope :by_event, ->(event_id) { where(event_id: event_id) }
-  scope :photos, -> { where(medium_type: 'photo') }
-  scope :audio, -> { where(medium_type: 'audio') }
-  scope :video, -> { where(medium_type: 'video') }
 
   # Class methods
   def self.duplicate_by_hash(hash)
@@ -404,9 +405,10 @@ class Medium < ApplicationRecord
   # Check if file exists
   # Helper method to get the full file path (directory + filename)
   def full_file_path
-    return nil unless file_path.present? && current_filename.present?
-    full_path = File.join(file_path, current_filename)
-    Rails.logger.debug "Medium#full_file_path: #{full_path} (file_path: #{file_path}, current_filename: #{current_filename})"
+    dir = computed_directory_path
+    return nil unless dir.present? && current_filename.present?
+    full_path = File.join(dir, current_filename)
+    Rails.logger.debug "Medium#full_file_path: #{full_path} (state: #{storage_state}, event_id: #{event_id}, subevent_id: #{subevent_id})"
     full_path
   end
   
@@ -1144,8 +1146,9 @@ class Medium < ApplicationRecord
     
     return if old_filename == new_filename || old_filename.blank? || new_filename.blank?
     
-    old_full_path = File.join(file_path, old_filename)
-    new_full_path = File.join(file_path, new_filename)
+    dir = computed_directory_path
+    old_full_path = File.join(dir, old_filename)
+    new_full_path = File.join(dir, new_filename)
     
     Rails.logger.info "=== RENAMING FILE ON DISK ==="
     Rails.logger.info "Old path: #{old_full_path}"
@@ -1196,8 +1199,9 @@ class Medium < ApplicationRecord
     end
     
     # Rename the file
+    dir = computed_directory_path
     old_full_path = full_file_path
-    new_full_path = File.join(file_path, new_filename)
+    new_full_path = File.join(dir, new_filename)
     
     if File.exist?(old_full_path)
       begin
@@ -1214,6 +1218,36 @@ class Medium < ApplicationRecord
     end
     
     Rails.logger.info "=== END RENAMING FILE DUE TO DATETIME CHANGE ==="
+  end
+
+  # Compute directory based on state and associations
+  def computed_directory_path
+    require_relative '../../lib/constants'
+    case storage_state.to_s
+    when 'unsorted'
+      Constants::UNSORTED_STORAGE
+    when 'daily'
+      return nil unless has_valid_datetime?
+      dt = effective_datetime
+      File.join(Constants::DAILY_STORAGE,
+               dt.year.to_s,
+               dt.month.to_s.rjust(2, '0'),
+               dt.day.to_s.rjust(2, '0'))
+    when 'event_root'
+      return nil unless event&.folder_name
+      File.join(Constants::EVENTS_STORAGE, event.folder_name)
+    when 'subevent_level1', 'subevent_level2'
+      return nil unless event&.folder_name && subevent
+      event_dir = File.join(Constants::EVENTS_STORAGE, event.folder_name)
+      if subevent.parent_subevent_id.present?
+        parent = subevent.parent_subevent
+        File.join(event_dir, parent.footer_name, subevent.footer_name)
+      else
+        File.join(event_dir, subevent.footer_name)
+      end
+    else
+      Constants::UNSORTED_STORAGE
+    end
   end
 
   # Generate filename using effective datetime
