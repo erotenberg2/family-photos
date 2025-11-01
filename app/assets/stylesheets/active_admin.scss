@@ -185,6 +185,16 @@
   overflow: hidden;
 }
 
+.info-preview-link {
+  display: block;
+  cursor: pointer;
+  transition: opacity 0.2s ease;
+  
+  &:hover {
+    opacity: 0.85;
+  }
+}
+
 .info-preview-image {
   width: 150px;
   height: auto;
@@ -249,6 +259,10 @@
   padding: 8px;
   min-height: 400px;
   max-height: 70vh;
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
 }
 
 // Tree structure styles
@@ -265,6 +279,9 @@
   margin: 2px 0;
   cursor: pointer;
   user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
   border-radius: 3px;
   
   &:hover {
@@ -315,12 +332,21 @@
   &.tree-item-medium {
     font-size: 12px;
     color: #333;
+    display: flex;
+    align-items: center;
+    gap: 8px;
     
     .tree-meta {
       margin-left: auto;
-      font-size: 10px;
-      color: #666;
-      font-style: italic;
+      
+      .tree-thumbnail {
+        width: 40px;
+        height: 40px;
+        object-fit: cover;
+        border-radius: 3px;
+        border: 1px solid #ddd;
+        display: block;
+      }
     }
   }
 }

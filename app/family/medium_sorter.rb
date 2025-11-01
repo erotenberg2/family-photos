@@ -8,7 +8,7 @@ ActiveAdmin.register_page "MediumSorter", namespace: :family do
       javascript_include_tag 'active_admin', 'data-turbo-track': 'reload'
     end
     
-    div id: "medium-sorter-container" do
+    div id: "medium-sorter-container", data: { multi_photos_path: image_path('multi_photos.png') } do
       # Container for three listboxes will be rendered by JavaScript
       div id: "medium-sorter-content" do
         para "Loading media..."
@@ -99,7 +99,7 @@ ActiveAdmin.register_page "MediumSorter", namespace: :family do
                   type: 'day',
                   label: day,
                   key: "#{year}/#{month}/#{day}",
-                  children: items.map do |item|
+                  children: items.sort_by { |item| (item[:filename] || item[:original_filename] || '').downcase }.map do |item|
                     {
                       type: 'medium',
                       label: item[:filename] || item[:original_filename],
@@ -226,9 +226,9 @@ ActiveAdmin.register_page "MediumSorter", namespace: :family do
         # Build children array: root media + subevent tree
         children = []
         
-        # Add root media if any
+        # Add root media if any (sorted alphabetically)
         if event_data[:root_media].any?
-          children.concat(event_data[:root_media].map do |item|
+          children.concat(event_data[:root_media].sort_by { |item| (item[:filename] || item[:original_filename] || '').downcase }.map do |item|
             {
               type: 'medium',
               label: item[:filename] || item[:original_filename],
@@ -266,9 +266,9 @@ ActiveAdmin.register_page "MediumSorter", namespace: :family do
       level1.map do |subevent|
         children = []
         
-        # Add media for this subevent
+        # Add media for this subevent (sorted alphabetically)
         if subevent[:media].any?
-          children.concat(subevent[:media].map do |item|
+          children.concat(subevent[:media].sort_by { |item| (item[:filename] || item[:original_filename] || '').downcase }.map do |item|
             {
               type: 'medium',
               label: item[:filename] || item[:original_filename],
@@ -286,7 +286,7 @@ ActiveAdmin.register_page "MediumSorter", namespace: :family do
               type: 'subevent_l2',
               label: child[:title],
               key: "subevent_#{child[:id]}",
-              children: child[:media].map do |item|
+              children: child[:media].sort_by { |item| (item[:filename] || item[:original_filename] || '').downcase }.map do |item|
                 {
                   type: 'medium',
                   label: item[:filename] || item[:original_filename],

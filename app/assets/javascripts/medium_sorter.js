@@ -15,6 +15,19 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
 
   // Store tree data by key for quick lookup
   let treeDataByKey = {};
+  
+  // Store last clicked item per column for range selection
+  let lastClickedItemByColumn = {};
+  
+  // Get multi_photos.png path from Rails data attribute
+  function getMultiPhotosPath() {
+    const container = document.getElementById('medium-sorter-container');
+    if (container && container.dataset.multiPhotosPath) {
+      return container.dataset.multiPhotosPath;
+    }
+    // Fallback to /assets/ if data attribute not available
+    return '/assets/multi_photos.png';
+  }
 
   // Wait for the container element to appear (ActiveAdmin may render it after DOMContentLoaded)
   function waitForContainer(callback, maxAttempts = 50) {
@@ -235,18 +248,25 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
     return html;
   }
 
-  // Get metadata string for item
+  // Get metadata HTML for item (thumbnail for photos, empty for others)
   function getItemMeta(item) {
     if (!item.data) return '';
     
-    const parts = [];
-    if (item.data.medium_type) {
-      parts.push(item.data.medium_type);
+    // For photos, show thumbnail
+    if (item.data.medium_type === 'photo') {
+      let thumbnailHtml = '';
+      if (item.data.thumbnail_url) {
+        thumbnailHtml = `<img src="${item.data.thumbnail_url}" alt="Thumb" class="tree-thumbnail" onerror="this.style.display='none';">`;
+      } else if (item.data.preview_url) {
+        thumbnailHtml = `<img src="${item.data.preview_url}" alt="Thumb" class="tree-thumbnail" onerror="this.style.display='none';">`;
+      } else if (item.data.medium_id) {
+        thumbnailHtml = `<img src="/thumbnails/${item.data.medium_id}" alt="Thumb" class="tree-thumbnail" onerror="this.style.display='none';">`;
+      }
+      return thumbnailHtml;
     }
-    if (item.data.file_size_human) {
-      parts.push(item.data.file_size_human);
-    }
-    return parts.join(' • ');
+    
+    // For non-photos, return empty (no metadata shown)
+    return '';
   }
 
   // Escape HTML to prevent XSS
@@ -304,32 +324,63 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
       });
     });
 
-    // Single-select functionality - one item per listbox
+    // Multi-select functionality with CMD+Click and Shift+Click
     const treeItems = document.querySelectorAll('.tree-item');
     console.log('[MediumSorter] Found', treeItems.length, 'tree items');
     treeItems.forEach(item => {
+      // Prevent text selection using selectstart event (IE/Safari)
+      item.addEventListener('selectstart', function(e) {
+        // Don't interfere with tree toggle
+        if (e.target.closest('.tree-toggle')) return;
+        e.preventDefault();
+        return false;
+      });
+      
       item.addEventListener('click', function(e) {
         // Don't interfere with tree toggle
         if (e.target.closest('.tree-toggle')) return;
+        
+        // Prevent default text selection behavior
+        e.preventDefault();
+        
+        // Clear any existing text selection
+        if (window.getSelection) {
+          window.getSelection().removeAllRanges();
+        } else if (document.selection) {
+          document.selection.empty();
+        }
         
         // Get the column this item belongs to
         const listbox = this.closest('.medium-sorter-listbox');
         const column = listbox ? listbox.getAttribute('data-column') : null;
         
-        // Deselect all items in this column
-        if (listbox) {
+        if (!column) return;
+        
+        const isMetaKey = e.metaKey || e.ctrlKey; // CMD on Mac, Ctrl on Windows/Linux
+        const isShiftKey = e.shiftKey;
+        
+        if (isShiftKey && lastClickedItemByColumn[column]) {
+          // Range selection: select all items between last clicked and current
+          handleRangeSelection(listbox, lastClickedItemByColumn[column], this);
+        } else if (isMetaKey) {
+          // Toggle selection with CMD/Ctrl
+          if (this.classList.contains('selected')) {
+            this.classList.remove('selected');
+          } else {
+            this.classList.add('selected');
+          }
+          lastClickedItemByColumn[column] = this;
+        } else {
+          // Regular click: deselect all and select this one
           listbox.querySelectorAll('.tree-item.selected').forEach(selected => {
             selected.classList.remove('selected');
           });
+          this.classList.add('selected');
+          lastClickedItemByColumn[column] = this;
         }
-        
-        // Select this item
-        this.classList.add('selected');
         
         // Update info panel
-        if (column) {
-          updateInfoPanel(column, this);
-        }
+        updateInfoPanel(column, listbox);
         
         e.stopPropagation();
       });
@@ -363,42 +414,197 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
     }
   }
 
-  // Update info panel based on selected item
-  function updateInfoPanel(column, itemElement) {
+  // Handle range selection (Shift+Click)
+  function handleRangeSelection(listbox, startElement, endElement) {
+    // Clear any existing text selection first
+    if (window.getSelection) {
+      window.getSelection().removeAllRanges();
+    } else if (document.selection) {
+      document.selection.empty();
+    }
+    
+    // Get all visible tree items in order
+    const allItems = Array.from(listbox.querySelectorAll('.tree-item'));
+    
+    // Filter to only visible items (not hidden by collapsed parents)
+    const visibleItems = allItems.filter(item => {
+      let parent = item.parentElement;
+      while (parent && parent !== listbox) {
+        if (parent.classList.contains('tree-children') && parent.style.display === 'none') {
+          return false;
+        }
+        parent = parent.parentElement;
+      }
+      return true;
+    });
+    
+    const startIndex = visibleItems.indexOf(startElement);
+    const endIndex = visibleItems.indexOf(endElement);
+    
+    if (startIndex === -1 || endIndex === -1) return;
+    
+    const minIndex = Math.min(startIndex, endIndex);
+    const maxIndex = Math.max(startIndex, endIndex);
+    
+    // Select all items in range
+    for (let i = minIndex; i <= maxIndex; i++) {
+      visibleItems[i].classList.add('selected');
+    }
+    
+    // Clear text selection again after selecting range (in case browser still tried to select)
+    setTimeout(() => {
+      if (window.getSelection) {
+        window.getSelection().removeAllRanges();
+      } else if (document.selection) {
+        document.selection.empty();
+      }
+    }, 0);
+  }
+  
+  // Update info panel based on selected items
+  function updateInfoPanel(column, listboxOrElement) {
     const infoPanel = document.getElementById(`${column}-info`);
     if (!infoPanel) return;
     
-    const itemKey = itemElement.getAttribute('data-key');
-    const itemType = itemElement.getAttribute('data-type');
-    const lookupKey = `${itemKey}_${column}`;
-    const item = treeDataByKey[lookupKey];
+    // Get listbox element
+    const listbox = listboxOrElement.classList && listboxOrElement.classList.contains('medium-sorter-listbox')
+      ? listboxOrElement
+      : listboxOrElement.closest('.medium-sorter-listbox');
     
-    if (!item) {
-      infoPanel.innerHTML = '<div class="info-placeholder">Item not found</div>';
+    if (!listbox) return;
+    
+    // Get all selected items in this column
+    const selectedItems = Array.from(listbox.querySelectorAll('.tree-item.selected'));
+    
+    if (selectedItems.length === 0) {
+      infoPanel.innerHTML = '<div class="info-placeholder">No item selected</div>';
       return;
     }
     
-    let html = '';
-    
-    if (itemType === 'medium') {
-      html = renderMediumInfo(item.data);
-    } else if (itemType === 'year') {
-      html = renderYearContainerInfo(item, column);
-    } else if (itemType === 'month') {
-      html = renderMonthContainerInfo(item, column);
-    } else if (itemType === 'day') {
-      html = renderDayContainerInfo(item, column);
-    } else if (itemType === 'event') {
-      html = renderEventContainerInfo(item, column);
-    } else if (itemType === 'subevent_l1') {
-      html = renderSL1ContainerInfo(item, column);
-    } else if (itemType === 'subevent_l2') {
-      html = renderSL2ContainerInfo(item, column);
+    if (selectedItems.length === 1) {
+      // Single selection - use existing logic
+      const itemElement = selectedItems[0];
+      const itemKey = itemElement.getAttribute('data-key');
+      const itemType = itemElement.getAttribute('data-type');
+      const lookupKey = `${itemKey}_${column}`;
+      const item = treeDataByKey[lookupKey];
+      
+      if (!item) {
+        infoPanel.innerHTML = '<div class="info-placeholder">Item not found</div>';
+        return;
+      }
+      
+      let html = '';
+      if (itemType === 'medium') {
+        html = renderMediumInfo(item.data);
+      } else if (itemType === 'year') {
+        html = renderYearContainerInfo(item, column);
+      } else if (itemType === 'month') {
+        html = renderMonthContainerInfo(item, column);
+      } else if (itemType === 'day') {
+        html = renderDayContainerInfo(item, column);
+      } else if (itemType === 'event') {
+        html = renderEventContainerInfo(item, column);
+      } else if (itemType === 'subevent_l1') {
+        html = renderSL1ContainerInfo(item, column);
+      } else if (itemType === 'subevent_l2') {
+        html = renderSL2ContainerInfo(item, column);
+      } else {
+        html = '<div class="info-placeholder">Unknown item type</div>';
+      }
+      
+      infoPanel.innerHTML = html;
     } else {
-      html = '<div class="info-placeholder">Unknown item type</div>';
+      // Multiple selection - analyze and render
+      const html = renderMultipleSelectionInfo(selectedItems, column);
+      infoPanel.innerHTML = html;
+    }
+  }
+  
+  // Render info for multiple selections
+  function renderMultipleSelectionInfo(selectedItems, column) {
+    // Analyze selected items
+    const itemsByType = {
+      medium: [],
+      containers: []
+    };
+    
+    let photoCount = 0;
+    let audioCount = 0;
+    let videoCount = 0;
+    let fileCount = 0;
+    
+    selectedItems.forEach(itemElement => {
+      const itemKey = itemElement.getAttribute('data-key');
+      const itemType = itemElement.getAttribute('data-type');
+      const lookupKey = `${itemKey}_${column}`;
+      const item = treeDataByKey[lookupKey];
+      
+      if (!item) return;
+      
+      if (itemType === 'medium' && item.data) {
+        itemsByType.medium.push(item);
+        if (item.data.medium_type === 'photo') photoCount++;
+        else if (item.data.medium_type === 'audio') audioCount++;
+        else if (item.data.medium_type === 'video') videoCount++;
+        else fileCount++;
+      } else {
+        itemsByType.containers.push(item);
+      }
+    });
+    
+    const totalMedia = itemsByType.medium.length;
+    const totalContainers = itemsByType.containers.length;
+    const isHybrid = totalMedia > 0 && totalContainers > 0;
+    const isAllPhotos = totalMedia > 0 && totalContainers === 0 && audioCount === 0 && videoCount === 0 && fileCount === 0;
+    
+    let previewHtml = '';
+    let titleHtml = '';
+    let metaHtml = '';
+    
+    if (isHybrid) {
+      // Hybrid selection: mix of media and containers
+      titleHtml = '<div class="info-title">Multiple Items</div>';
+      metaHtml = `
+        <div class="info-meta">
+          ${totalMedia > 0 ? `<div><strong>Media:</strong> ${totalMedia} item${totalMedia !== 1 ? 's' : ''}</div>` : ''}
+          ${photoCount > 0 ? `<div>• Photos: ${photoCount}</div>` : ''}
+          ${audioCount > 0 ? `<div>• Audio: ${audioCount}</div>` : ''}
+          ${videoCount > 0 ? `<div>• Video: ${videoCount}</div>` : ''}
+          ${fileCount > 0 ? `<div>• Files: ${fileCount}</div>` : ''}
+          ${totalContainers > 0 ? `<div><strong>Containers:</strong> ${totalContainers}</div>` : ''}
+        </div>
+      `;
+      previewHtml = '<div class="info-placeholder-icon">📦</div>';
+    } else if (isAllPhotos) {
+      // All photos: show multi_photos.png icon
+      titleHtml = `<div class="info-title">${photoCount} Photo${photoCount !== 1 ? 's' : ''}</div>`;
+      metaHtml = `<div class="info-meta"><div><strong>Selected:</strong> ${photoCount} photo${photoCount !== 1 ? 's' : ''}</div></div>`;
+      previewHtml = `<img src="${getMultiPhotosPath()}" alt="Multiple Photos" class="info-preview-image" onerror="this.style.display='none'; this.parentElement.innerHTML='<div class=\\'info-placeholder-icon\\'>📷</div>';" style="width: 150px; height: auto; object-fit: contain;">`;
+    } else {
+      // Multiple media but not all photos
+      titleHtml = '<div class="info-title">Multiple Items</div>';
+      metaHtml = `
+        <div class="info-meta">
+          <div><strong>Selected:</strong> ${totalMedia} item${totalMedia !== 1 ? 's' : ''}</div>
+          ${photoCount > 0 ? `<div>• Photos: ${photoCount}</div>` : ''}
+          ${audioCount > 0 ? `<div>• Audio: ${audioCount}</div>` : ''}
+          ${videoCount > 0 ? `<div>• Video: ${videoCount}</div>` : ''}
+          ${fileCount > 0 ? `<div>• Files: ${fileCount}</div>` : ''}
+        </div>
+      `;
+      previewHtml = '<div class="info-placeholder-icon">📦</div>';
     }
     
-    infoPanel.innerHTML = html;
+    return `
+      <div class="info-content">
+        <div class="info-preview">${previewHtml}</div>
+        <div class="info-details">
+          ${titleHtml}
+          ${metaHtml}
+        </div>
+      </div>
+    `;
   }
 
   // Render info for medium instance
@@ -419,9 +625,15 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
         imageHtml = `<div class="info-placeholder-icon">${data.icon || '📷'}</div>`;
       }
       
+      // Make preview image clickable to navigate to AA resource page
+      const mediumUrl = data.medium_id ? `/family/media/${data.medium_id}` : '#';
+      const clickableImageHtml = data.medium_id 
+        ? `<a href="${mediumUrl}" class="info-preview-link">${imageHtml}</a>`
+        : imageHtml;
+      
       return `
         <div class="info-content">
-          <div class="info-preview">${imageHtml}</div>
+          <div class="info-preview">${clickableImageHtml}</div>
           <div class="info-details">
             <div class="info-title">${escapeHtml(data.filename || data.original_filename)}</div>
             <div class="info-meta">
@@ -668,6 +880,9 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
       });
     }
     
+    // Clear last clicked item for this column (DOM elements are new)
+    delete lastClickedItemByColumn[column];
+    
     attachEventListeners();
   }
 
@@ -679,6 +894,9 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
     
     // Rebuild tree data map with original data
     buildTreeDataMap(mediaData);
+    
+    // Clear last clicked item for this column (DOM elements are new)
+    delete lastClickedItemByColumn[column];
     
     attachEventListeners();
   }
