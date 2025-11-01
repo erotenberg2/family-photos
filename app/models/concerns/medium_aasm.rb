@@ -239,8 +239,8 @@ module MediumAasm
   def move_file_to_unsorted
     # Ensure we have fresh DB values in case the event folder was renamed mid-batch
     reload
-    old_path = file_path  # Save old path for cleanup
     source_path = full_file_path
+    old_dir = File.dirname(source_path) if source_path && File.exist?(source_path) # Save old directory for cleanup
     dest_dir = Constants::UNSORTED_STORAGE
     
     FileUtils.mkdir_p(dest_dir) unless Dir.exist?(dest_dir)
@@ -251,7 +251,7 @@ module MediumAasm
       candidates = Medium.search_for_file(current_filename)
       if candidates.any?
         source_path = candidates.first
-        old_path = File.dirname(source_path)
+        old_dir = File.dirname(source_path)
         Rails.logger.info "✅ Fallback found source at: #{source_path}"
       else
         Rails.logger.error "❌ move_file_to_unsorted: source file not found anywhere for #{current_filename}"
@@ -294,17 +294,15 @@ module MediumAasm
       Rails.logger.info "unsorted: moving #{source_path} -> #{dest_path}"
       if source_path == dest_path
         # Already correct location
-        self.file_path = dest_dir
         Rails.logger.info "✅ File already at unsorted: #{dest_path}"
         return true
       end
       FileUtils.mv(source_path, dest_path)
       # Update in-memory attributes (persisted after transition)
-      self.file_path = dest_dir
       self.current_filename = File.basename(dest_path)
       Rails.logger.info "✅ Moved file to unsorted: #{dest_path}"
       # Clean up empty directories in source location
-      cleanup_empty_directories(old_path)
+      cleanup_empty_directories(old_dir)
       true
     rescue => e
       Rails.logger.error "❌ Failed to move to unsorted: #{e.message}"
@@ -319,7 +317,6 @@ module MediumAasm
       return false
     end
     
-    old_path = file_path  # Save old path for cleanup
     date = effective_datetime
     year = date.year.to_s
     month = date.month.to_s.rjust(2, '0')
@@ -328,65 +325,65 @@ module MediumAasm
     daily_dir = File.join(Constants::DAILY_STORAGE, year, month, day)
     new_path = File.join(daily_dir, current_filename)
     
+    source_path = full_file_path
+    old_dir = File.dirname(source_path) if source_path && File.exist?(source_path)
     FileUtils.mkdir_p(daily_dir) unless Dir.exist?(daily_dir)
     
     Rails.logger.info "daily: dest_dir=#{daily_dir} dest_path=#{new_path}"
-    if File.exist?(full_file_path) && full_file_path != new_path
-      Rails.logger.info "daily: moving #{full_file_path} -> #{new_path}"
-      FileUtils.mv(full_file_path, new_path)
+    if File.exist?(source_path) && source_path != new_path
+      Rails.logger.info "daily: moving #{source_path} -> #{new_path}"
+      FileUtils.mv(source_path, new_path)
       # Update in-memory attributes (will be saved by AASM)
-      self.file_path = daily_dir
       Rails.logger.info "✅ Moved file to: #{new_path}"
       
       # Clean up empty directories in source location
-      cleanup_empty_directories(old_path)
+      cleanup_empty_directories(old_dir)
       true
     else
-      unless File.exist?(full_file_path)
-        Rails.logger.error "❌ move_file_to_daily: source file missing: #{full_file_path}"
+      unless File.exist?(source_path)
+        Rails.logger.error "❌ move_file_to_daily: source file missing: #{source_path}"
         return false
       end
       Rails.logger.info "daily: already at destination #{new_path}"
       # Already at destination
-      self.file_path = daily_dir
       true
     end
   end
   
   # Move file to event root (only moves file, doesn't update DB)
   def move_file_to_event
-    old_path = file_path  # Save old path for cleanup
+    source_path = full_file_path
+    old_dir = File.dirname(source_path) if source_path && File.exist?(source_path)
     event_dir = File.join(Constants::EVENTS_STORAGE, event.folder_name)
     new_path = File.join(event_dir, current_filename)
     
     FileUtils.mkdir_p(event_dir) unless Dir.exist?(event_dir)
     
     Rails.logger.info "event: dest_dir=#{event_dir} dest_path=#{new_path}"
-    if File.exist?(full_file_path) && full_file_path != new_path
-      Rails.logger.info "event: moving #{full_file_path} -> #{new_path}"
-      FileUtils.mv(full_file_path, new_path)
+    if File.exist?(source_path) && source_path != new_path
+      Rails.logger.info "event: moving #{source_path} -> #{new_path}"
+      FileUtils.mv(source_path, new_path)
       # Update in-memory attributes (will be saved by AASM)
-      self.file_path = event_dir
       Rails.logger.info "✅ Moved file to: #{new_path}"
       
       # Clean up empty directories in source location
-      cleanup_empty_directories(old_path)
+      cleanup_empty_directories(old_dir)
       true
     else
-      unless File.exist?(full_file_path)
-        Rails.logger.error "❌ move_file_to_event: source file missing: #{full_file_path}"
+      unless File.exist?(source_path)
+        Rails.logger.error "❌ move_file_to_event: source file missing: #{source_path}"
         return false
       end
       Rails.logger.info "event: already at destination #{new_path}"
       # Already at destination
-      self.file_path = event_dir
       true
     end
   end
   
   # Move file to subevent (only moves file, doesn't update DB)
   def move_file_to_subevent
-    old_path = file_path  # Save old path for cleanup
+    source_path = full_file_path
+    old_dir = File.dirname(source_path) if source_path && File.exist?(source_path)
     event_dir = File.join(Constants::EVENTS_STORAGE, event.folder_name)
     
     if subevent.parent_subevent_id.present?
@@ -403,35 +400,33 @@ module MediumAasm
     FileUtils.mkdir_p(subevent_dir) unless Dir.exist?(subevent_dir)
     
     Rails.logger.info "subevent: dest_dir=#{subevent_dir} dest_path=#{new_path}"
-    if File.exist?(full_file_path) && full_file_path != new_path
-      Rails.logger.info "subevent: moving #{full_file_path} -> #{new_path}"
-      FileUtils.mv(full_file_path, new_path)
+    if File.exist?(source_path) && source_path != new_path
+      Rails.logger.info "subevent: moving #{source_path} -> #{new_path}"
+      FileUtils.mv(source_path, new_path)
       # Update in-memory attributes (will be saved by AASM)
-      self.file_path = subevent_dir
       Rails.logger.info "✅ Moved file to: #{new_path}"
       
       # Clean up empty directories in source location
-      cleanup_empty_directories(old_path)
+      cleanup_empty_directories(old_dir)
       true
     else
-      unless File.exist?(full_file_path)
-        Rails.logger.error "❌ move_file_to_subevent: source file missing: #{full_file_path}"
+      unless File.exist?(source_path)
+        Rails.logger.error "❌ move_file_to_subevent: source file missing: #{source_path}"
         return false
       end
       Rails.logger.info "subevent: already at destination #{new_path}"
       # Already at destination
-      self.file_path = subevent_dir
       true
     end
   end
   
   # Clean up empty directories after moving a file
   # Walks up the directory tree removing empty directories until hitting a storage root
-  def cleanup_empty_directories(old_file_path)
-    return unless old_file_path
+  def cleanup_empty_directories(old_dir)
+    return unless old_dir
     
     # Walk up the directory tree and remove empty directories
-    dir_path = old_file_path
+    dir_path = old_dir
     
     while dir_path && dir_path != Constants::UNSORTED_STORAGE && 
           dir_path != Constants::DAILY_STORAGE && dir_path != Constants::EVENTS_STORAGE

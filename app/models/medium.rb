@@ -104,7 +104,7 @@ class Medium < ApplicationRecord
     missing_files = []
     
     Medium.all.each do |medium|
-      if medium.file_path.present? && medium.current_filename.present?
+      if medium.current_filename.present?
         unless File.exist?(medium.full_file_path)
           missing_files << {
             id: medium.id,
@@ -263,7 +263,7 @@ class Medium < ApplicationRecord
         new_path = found_files.first
         Rails.logger.info "Found file at: #{new_path}"
         
-        # Determine correct storage class based on path
+        # Determine correct storage class and state based on path
         new_storage_class = if new_path.include?('/unsorted/')
           'unsorted'
         elsif new_path.include?('/daily/')
@@ -274,14 +274,14 @@ class Medium < ApplicationRecord
           'unsorted' # fallback
         end
         
+        # Update storage_class only - file_path is computed from state
         medium.update!(
-          file_path: new_path,
           storage_class: new_storage_class,
           event_id: nil, # Reset event associations since we're fixing orphaned records
           subevent_id: nil
         )
         
-        Rails.logger.info "✅ Fixed Medium #{medium.id} - updated path to: #{new_path}"
+        Rails.logger.info "✅ Fixed Medium #{medium.id} - updated storage class to: #{new_storage_class}"
         fixed_count += 1
       else
         Rails.logger.warn "❌ Could not find file for Medium #{medium.id}: #{medium.original_filename}"
@@ -531,7 +531,6 @@ class Medium < ApplicationRecord
     
     # Create Medium record with timing information
     medium = new(
-      file_path: upload_dir,  # Store only the directory path
       file_size: File.size(full_file_path),
       original_filename: uploaded_file.original_filename,
       current_filename: stored_filename,

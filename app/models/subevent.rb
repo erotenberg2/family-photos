@@ -153,14 +153,8 @@ class Subevent < ApplicationRecord
   end
   
   def update_media_file_paths(old_folder_name, new_folder_name)
-    # Update file paths for all media in this subevent
-    media.each do |medium|
-      if medium.file_path&.include?(old_folder_name)
-        new_file_path = medium.file_path.gsub(old_folder_name, new_folder_name)
-        medium.update_column(:file_path, new_file_path)
-        Rails.logger.debug "Updated file path for Medium #{medium.id}: #{new_file_path}"
-      end
-    end
+    # Paths are now computed from state - no need to update media
+    Rails.logger.info "Subevent folder renamed from '#{old_folder_name}' to '#{new_folder_name}' - paths computed from state"
   end
   
   def set_initial_folder_path
@@ -198,7 +192,7 @@ class Subevent < ApplicationRecord
       Rails.logger.info "  Current file exists: #{File.exist?(medium.full_file_path) if medium.full_file_path}"
       
       begin
-        if medium.file_path && medium.current_filename && File.exist?(medium.full_file_path)
+        if medium.current_filename.present? && File.exist?(medium.full_file_path)
           # Use the current_filename from the database
           current_filename = medium.current_filename
           
@@ -216,10 +210,11 @@ class Subevent < ApplicationRecord
             counter = 1
             loop do
               new_filename = "#{base_name}-(#{counter})#{extension}"
-              new_path = File.join(type_dir, new_filename)
+              new_path = File.join(event_dir, new_filename)
               
               if Medium.is_filename_unique_in_database(new_filename)
                 Rails.logger.info "  ⚠️ Filename conflict resolved: #{current_filename} -> #{new_filename}"
+                current_filename = new_filename
                 break
               end
               
@@ -228,8 +223,8 @@ class Subevent < ApplicationRecord
             end
           end
           
-          Rails.logger.info "  Target directory: #{type_dir}"
-          Rails.logger.info "  Target directory exists: #{Dir.exist?(type_dir)}"
+          Rails.logger.info "  Target directory: #{event_dir}"
+          Rails.logger.info "  Target directory exists: #{Dir.exist?(event_dir)}"
           Rails.logger.info "  New file path: #{new_path}"
           Rails.logger.info "  New path already exists: #{File.exist?(new_path)}"
           
@@ -243,7 +238,6 @@ class Subevent < ApplicationRecord
             
             # Update the medium record - keep in event but remove subevent association
             medium.update!(
-              file_path: type_dir,  # Store only the directory path
               current_filename: File.basename(new_path),
               storage_class: 'event',
               event_id: event.id,
@@ -260,13 +254,12 @@ class Subevent < ApplicationRecord
           end
         else
           Rails.logger.warn "  ⚠️ Medium #{medium.id} file not found at: #{medium.full_file_path}"
-          Rails.logger.warn "  ⚠️ File path present: #{medium.file_path.present?}"
           Rails.logger.warn "  ⚠️ Current filename present: #{medium.current_filename.present?}"
           Rails.logger.warn "  ⚠️ File exists: #{File.exist?(medium.full_file_path) if medium.full_file_path}"
           
           # Still update the database record even if file is missing
           medium.update!(
-            current_filename: current_filename,
+            current_filename: medium.current_filename,
             storage_class: 'event',
             event_id: event.id,
             subevent_id: nil

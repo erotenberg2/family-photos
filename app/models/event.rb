@@ -109,48 +109,11 @@ class Event < ApplicationRecord
   end
   
   # Manual method to fix file paths for existing events
+  # NOTE: With computed paths, this method is obsolete. Paths are now computed from state.
   def fix_media_file_paths!
-    Rails.logger.info "=== MANUALLY FIXING MEDIA FILE PATHS ==="
-    Rails.logger.info "Event: #{title} (ID: #{id})"
-    Rails.logger.info "Current folder_path: '#{folder_path}'"
-    Rails.logger.info "Expected folder_name: '#{folder_name}'"
-    
-    # Check if any media file paths need updating
-    expected_folder_name = folder_name
-    updated_count = 0
-    
-    media.each do |medium|
-      Rails.logger.info "Checking Medium #{medium.id}: #{medium.file_path}"
-      
-      # Extract the current folder name from the file path
-      if medium.file_path
-        current_folder_match = medium.file_path.match(%r{/events/([^/]+)/})
-        if current_folder_match
-          current_folder_name = current_folder_match[1]
-          Rails.logger.info "  Current folder in file path: '#{current_folder_name}'"
-          Rails.logger.info "  Expected folder: '#{expected_folder_name}'"
-          
-          if current_folder_name != expected_folder_name
-            Rails.logger.info "  ⚠️ Folder names don't match - updating file path"
-            new_file_path = medium.file_path.gsub(current_folder_name, expected_folder_name)
-            Rails.logger.info "  From: #{medium.file_path}"
-            Rails.logger.info "  To: #{new_file_path}"
-            medium.update_column(:file_path, new_file_path)
-            updated_count += 1
-            Rails.logger.info "  ✅ Updated Medium #{medium.id}"
-          else
-            Rails.logger.info "  ✅ Folder names match - no update needed"
-          end
-        else
-          Rails.logger.info "  ⚠️ Could not extract folder name from file path"
-        end
-      else
-        Rails.logger.info "  ⚠️ Medium #{medium.id} has no file_path"
-      end
-    end
-    
-    Rails.logger.info "Updated #{updated_count} media file paths"
-    Rails.logger.info "=== END MANUALLY FIXING MEDIA FILE PATHS ==="
+    Rails.logger.warn "fix_media_file_paths! is deprecated - paths are now computed from state"
+    Rails.logger.info "Event: #{title} (ID: #{id}) - folder_name: '#{folder_name}'"
+    Rails.logger.info "Media count: #{media.count}"
   end
 
   private
@@ -194,8 +157,7 @@ class Event < ApplicationRecord
         # Update the folder_path in the database
         update_column(:folder_path, new_folder_name)
         
-        # Update file paths for all associated media using the improved logic
-        update_media_file_paths_improved(new_folder_name)
+        # Paths are now computed from state - no need to update media
       rescue => e
         Rails.logger.error "❌ Failed to rename event folder from '#{folder_path}' to '#{new_folder_name}': #{e.message}"
         Rails.logger.error "Backtrace: #{e.backtrace.first(5).join('\n')}"
@@ -226,7 +188,7 @@ class Event < ApplicationRecord
       if Dir.exist?(old_path) && old_path != new_path
         FileUtils.mv(old_path, new_path)
         update_column(:folder_path, new_folder_name)
-        update_media_file_paths_improved(new_folder_name)
+        # Paths are now computed from state - no need to update media
         Rails.logger.info "✅ Event folder renamed to: #{new_folder_name}"
       elsif Dir.exist?(new_path)
         # Already at correct name; ensure DB value matches
@@ -243,69 +205,15 @@ class Event < ApplicationRecord
   end
   
   def update_media_file_paths(old_folder_name, new_folder_name)
-    Rails.logger.info "=== UPDATING MEDIA FILE PATHS ==="
-    Rails.logger.info "Old folder name: '#{old_folder_name}'"
-    Rails.logger.info "New folder name: '#{new_folder_name}'"
-    Rails.logger.info "Media count in this event: #{media.count}"
-    
-    updated_count = 0
-    media.each do |medium|
-      Rails.logger.info "Checking Medium #{medium.id}: #{medium.file_path}"
-      if medium.file_path&.include?(old_folder_name)
-        new_file_path = medium.file_path.gsub(old_folder_name, new_folder_name)
-        Rails.logger.info "Updating Medium #{medium.id} file path:"
-        Rails.logger.info "  From: #{medium.file_path}"
-        Rails.logger.info "  To: #{new_file_path}"
-        medium.update_column(:file_path, new_file_path)
-        updated_count += 1
-        Rails.logger.info "✅ Updated file path for Medium #{medium.id}"
-      else
-        Rails.logger.info "Medium #{medium.id} file path doesn't contain old folder name"
-      end
-    end
-    
-    Rails.logger.info "Updated #{updated_count} media file paths"
-    Rails.logger.info "=== END UPDATING MEDIA FILE PATHS ==="
+    Rails.logger.warn "update_media_file_paths is deprecated - paths are now computed from state"
+    Rails.logger.info "Event folder renamed from '#{old_folder_name}' to '#{new_folder_name}'"
+    Rails.logger.info "Media count: #{media.count} - paths will be computed automatically"
   end
   
   def update_media_file_paths_improved(expected_folder_name)
-    Rails.logger.info "=== UPDATING MEDIA FILE PATHS (IMPROVED) ==="
+    Rails.logger.warn "update_media_file_paths_improved is deprecated - paths are now computed from state"
     Rails.logger.info "Expected folder name: '#{expected_folder_name}'"
-    Rails.logger.info "Media count in this event: #{media.count}"
-    
-    updated_count = 0
-    media.each do |medium|
-      Rails.logger.info "Checking Medium #{medium.id}: #{medium.file_path}"
-      
-      # Extract the current folder name from the file path
-      if medium.file_path
-        current_folder_match = medium.file_path.match(%r{/events/([^/]+)/})
-        if current_folder_match
-          current_folder_name = current_folder_match[1]
-          Rails.logger.info "  Current folder in file path: '#{current_folder_name}'"
-          Rails.logger.info "  Expected folder: '#{expected_folder_name}'"
-          
-          if current_folder_name != expected_folder_name
-            Rails.logger.info "  ⚠️ Folder names don't match - updating file path"
-            new_file_path = medium.file_path.gsub(current_folder_name, expected_folder_name)
-            Rails.logger.info "  From: #{medium.file_path}"
-            Rails.logger.info "  To: #{new_file_path}"
-            medium.update_column(:file_path, new_file_path)
-            updated_count += 1
-            Rails.logger.info "  ✅ Updated Medium #{medium.id}"
-          else
-            Rails.logger.info "  ✅ Folder names match - no update needed"
-          end
-        else
-          Rails.logger.info "  ⚠️ Could not extract folder name from file path"
-        end
-      else
-        Rails.logger.info "  ⚠️ Medium #{medium.id} has no file_path"
-      end
-    end
-    
-    Rails.logger.info "Updated #{updated_count} media file paths"
-    Rails.logger.info "=== END UPDATING MEDIA FILE PATHS (IMPROVED) ==="
+    Rails.logger.info "Media count: #{media.count} - paths will be computed automatically"
   end
   
   def debug_event_update
@@ -341,9 +249,6 @@ class Event < ApplicationRecord
     # Debug: Check if there are any media records that should be associated
     all_media_with_event = Medium.where(event_id: id)
     Rails.logger.info "DEBUG: Media with event_id=#{id}: #{all_media_with_event.count}"
-    all_media_with_event.each do |m|
-      Rails.logger.info "DEBUG: Medium #{m.id}: #{m.original_filename} at #{m.file_path}"
-    end
     
     # Track success/failure for folder cleanup decision
     @media_move_success = true
@@ -360,7 +265,7 @@ class Event < ApplicationRecord
       Rails.logger.info "  Current file exists: #{File.exist?(medium.full_file_path) if medium.full_file_path}"
       
       begin
-        if medium.file_path && medium.current_filename && File.exist?(medium.full_file_path)
+        if medium.current_filename.present? && File.exist?(medium.full_file_path)
           # Use the current_filename from the database
           current_filename = medium.current_filename
           
@@ -405,7 +310,6 @@ class Event < ApplicationRecord
             
             # Update the medium record
             medium.update!(
-              file_path: Constants::UNSORTED_STORAGE,  # Store only the directory path
               current_filename: File.basename(new_path),
               storage_class: 'unsorted',
               event_id: nil,
@@ -422,13 +326,12 @@ class Event < ApplicationRecord
           end
         else
           Rails.logger.warn "  ⚠️ Medium #{medium.id} file not found at: #{medium.full_file_path}"
-          Rails.logger.warn "  ⚠️ File path present: #{medium.file_path.present?}"
           Rails.logger.warn "  ⚠️ Current filename present: #{medium.current_filename.present?}"
           Rails.logger.warn "  ⚠️ File exists: #{File.exist?(medium.full_file_path) if medium.full_file_path}"
           
           # Still update the database record even if file is missing
           medium.update!(
-            current_filename: current_filename,
+            current_filename: medium.current_filename,
             storage_class: 'unsorted',
             event_id: nil,
             subevent_id: nil
