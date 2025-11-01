@@ -28,6 +28,20 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
     // Fallback to /assets/ if data attribute not available
     return '/assets/multi_photos.png';
   }
+  
+  // Storage state icons (matching Constants in Rails)
+  const STORAGE_ICONS = {
+    unsorted: '📥',
+    daily: '📅',
+    event_root: '✈️',
+    subevent_level1: '✈️📂',
+    subevent_level2: '✈️📂📂'
+  };
+  
+  // Get icon for storage state
+  function getIcon(iconType) {
+    return STORAGE_ICONS[iconType] || '';
+  }
 
   // Wait for the container element to appear (ActiveAdmin may render it after DOMContentLoaded)
   function waitForContainer(callback, maxAttempts = 50) {
@@ -139,7 +153,7 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
         <!-- Unsorted Column -->
         <div class="medium-sorter-column">
           <div class="medium-sorter-header">
-            <h3>Unsorted</h3>
+            <h3>${STORAGE_ICONS.unsorted} Unsorted</h3>
             <div class="medium-sorter-filters">
               <button class="filter-btn" data-filter="daterange">Date Range</button>
               <button class="filter-btn" data-filter="date">Date (Y/M/D)</button>
@@ -159,7 +173,7 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
         <!-- Daily Column -->
         <div class="medium-sorter-column">
           <div class="medium-sorter-header">
-            <h3>Daily</h3>
+            <h3>${STORAGE_ICONS.daily} Daily</h3>
             <div class="medium-sorter-filters">
               <button class="filter-btn" data-filter="daterange">Date Range</button>
               <button class="filter-btn" data-filter="date">Date (Y/M/D)</button>
@@ -179,7 +193,7 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
         <!-- Events Column -->
         <div class="medium-sorter-column">
           <div class="medium-sorter-header">
-            <h3>Events</h3>
+            <h3>${STORAGE_ICONS.event_root} Events</h3>
           </div>
           <div class="medium-sorter-info" id="events-info">
             <div class="info-placeholder">Click on an item to see details</div>
@@ -336,6 +350,16 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
         return false;
       });
       
+      // Right-click context menu for event and subevent containers
+      item.addEventListener('contextmenu', function(e) {
+        const itemType = this.getAttribute('data-type');
+        if (itemType === 'event' || itemType === 'subevent_l1' || itemType === 'subevent_l2') {
+          e.preventDefault();
+          showContextMenu(e, this);
+          return false;
+        }
+      });
+      
       item.addEventListener('click', function(e) {
         // Don't interfere with tree toggle
         if (e.target.closest('.tree-toggle')) return;
@@ -358,6 +382,15 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
         
         const isMetaKey = e.metaKey || e.ctrlKey; // CMD on Mac, Ctrl on Windows/Linux
         const isShiftKey = e.shiftKey;
+        
+        // Clear selections in other listboxes (but only if not CMD/Ctrl clicking in the same column)
+        // For initial click or shift-click, always clear other columns
+        // For CMD/Ctrl click, only clear other columns if this is the first click in this column
+        const shouldClearOtherColumns = !isMetaKey || (isMetaKey && !lastClickedItemByColumn[column]);
+        
+        if (shouldClearOtherColumns) {
+          clearSelectionsInOtherColumns(column);
+        }
         
         if (isShiftKey && lastClickedItemByColumn[column]) {
           // Range selection: select all items between last clicked and current
@@ -414,6 +447,24 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
     }
   }
 
+  // Clear selections in all listboxes except the specified column
+  function clearSelectionsInOtherColumns(currentColumn) {
+    const allListboxes = document.querySelectorAll('.medium-sorter-listbox');
+    allListboxes.forEach(listbox => {
+      const column = listbox.getAttribute('data-column');
+      if (column && column !== currentColumn) {
+        // Clear all selected items in this listbox
+        listbox.querySelectorAll('.tree-item.selected').forEach(selected => {
+          selected.classList.remove('selected');
+        });
+        // Clear last clicked item for this column
+        delete lastClickedItemByColumn[column];
+        // Update info panel to show no selection
+        updateInfoPanel(column, listbox);
+      }
+    });
+  }
+  
   // Handle range selection (Shift+Click)
   function handleRangeSelection(listbox, startElement, endElement) {
     // Clear any existing text selection first
@@ -753,6 +804,56 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
   }
 
   // Render info for event-container
+  // Build action buttons for event/subevent containers
+  function buildActionButtons(itemType, itemData) {
+    const buttons = [];
+    
+    if (itemType === 'event') {
+      buttons.push({
+        label: 'Show',
+        url: `/family/events/${itemData.event_id}`,
+        class: 'info-action-btn'
+      });
+      buttons.push({
+        label: 'Edit',
+        url: `/family/events/${itemData.event_id}/edit`,
+        class: 'info-action-btn'
+      });
+      buttons.push({
+        label: 'Create Subevent',
+        url: `/family/subevents/new?event_id=${itemData.event_id}`,
+        class: 'info-action-btn'
+      });
+    } else if (itemType === 'subevent_l1' || itemType === 'subevent_l2') {
+      buttons.push({
+        label: 'Show',
+        url: `/family/subevents/${itemData.subevent_id}`,
+        class: 'info-action-btn'
+      });
+      buttons.push({
+        label: 'Edit',
+        url: `/family/subevents/${itemData.subevent_id}/edit`,
+        class: 'info-action-btn'
+      });
+      
+      if (itemType === 'subevent_l1') {
+        buttons.push({
+          label: 'Create Subevent',
+          url: `/family/subevents/new?event_id=${itemData.event_id}&parent_subevent_id=${itemData.subevent_id}`,
+          class: 'info-action-btn'
+        });
+      }
+    }
+    
+    if (buttons.length === 0) return '';
+    
+    const buttonsHtml = buttons.map(btn => 
+      `<a href="${btn.url}" class="${btn.class}">${escapeHtml(btn.label)}</a>`
+    ).join('');
+    
+    return `<div class="info-actions">${buttonsHtml}</div>`;
+  }
+
   function renderEventContainerInfo(item, column) {
     const stats = calculateContainerStats(item);
     const eventData = item.data || {};
@@ -768,6 +869,8 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
       `;
     }
     
+    const actionButtons = buildActionButtons('event', eventData);
+    
     return `
       <div class="info-content">
         <div class="info-title">Event: ${escapeHtml(item.label)}</div>
@@ -779,6 +882,7 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
           <div><strong>Video:</strong> ${stats.video}</div>
           ${item.children ? `<div><strong>Subevents:</strong> ${item.children.filter(c => c.type === 'subevent_l1').length}</div>` : ''}
         </div>
+        ${actionButtons}
       </div>
     `;
   }
@@ -786,6 +890,9 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
   // Render info for SL1-container
   function renderSL1ContainerInfo(item, column) {
     const stats = calculateContainerStats(item);
+    const subeventData = item.data || {};
+    const actionButtons = buildActionButtons('subevent_l1', subeventData);
+    
     return `
       <div class="info-content">
         <div class="info-title">Subevent: ${escapeHtml(item.label)}</div>
@@ -795,6 +902,7 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
           <div><strong>Audio:</strong> ${stats.audio}</div>
           <div><strong>Video:</strong> ${stats.video}</div>
         </div>
+        ${actionButtons}
       </div>
     `;
   }
@@ -802,6 +910,9 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
   // Render info for SL2-container
   function renderSL2ContainerInfo(item, column) {
     const stats = calculateContainerStats(item);
+    const subeventData = item.data || {};
+    const actionButtons = buildActionButtons('subevent_l2', subeventData);
+    
     return `
       <div class="info-content">
         <div class="info-title">Subevent: ${escapeHtml(item.label)}</div>
@@ -811,6 +922,7 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
           <div><strong>Audio:</strong> ${stats.audio}</div>
           <div><strong>Video:</strong> ${stats.video}</div>
         </div>
+        ${actionButtons}
       </div>
     `;
   }
@@ -970,6 +1082,135 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
     return filterByDateRange(items, startDate, endDate);
   }
 
+  // Show context menu for event/subevent containers
+  function showContextMenu(event, itemElement) {
+    // Remove any existing context menu
+    const existingMenu = document.getElementById('medium-sorter-context-menu');
+    if (existingMenu) {
+      existingMenu.remove();
+    }
+    
+    const itemType = itemElement.getAttribute('data-type');
+    const itemKey = itemElement.getAttribute('data-key');
+    const listbox = itemElement.closest('.medium-sorter-listbox');
+    const column = listbox ? listbox.getAttribute('data-column') : 'events';
+    
+    // Get item data from treeDataByKey
+    const lookupKey = `${itemKey}_${column}`;
+    const item = treeDataByKey[lookupKey];
+    
+    if (!item || !item.data) {
+      console.error('[MediumSorter] Context menu: Item data not found', lookupKey);
+      return;
+    }
+    
+    const menuItems = [];
+    
+    // Build menu items based on item type
+    if (itemType === 'event') {
+      menuItems.push({
+        label: 'Show',
+        action: () => {
+          window.location.href = `/family/events/${item.data.event_id}`;
+        }
+      });
+      menuItems.push({
+        label: 'Edit',
+        action: () => {
+          window.location.href = `/family/events/${item.data.event_id}/edit`;
+        }
+      });
+      menuItems.push({
+        label: 'Create Subevent',
+        action: () => {
+          window.location.href = `/family/subevents/new?event_id=${item.data.event_id}`;
+        }
+      });
+    } else if (itemType === 'subevent_l1' || itemType === 'subevent_l2') {
+      menuItems.push({
+        label: 'Show',
+        action: () => {
+          window.location.href = `/family/subevents/${item.data.subevent_id}`;
+        }
+      });
+      menuItems.push({
+        label: 'Edit',
+        action: () => {
+          window.location.href = `/family/subevents/${item.data.subevent_id}/edit`;
+        }
+      });
+      
+      // Add new subevent (only for SL1, not SL2)
+      if (itemType === 'subevent_l1') {
+        menuItems.push({
+          label: 'Create Subevent',
+          action: () => {
+            const params = new URLSearchParams({
+              event_id: item.data.event_id,
+              parent_subevent_id: item.data.subevent_id
+            });
+            window.location.href = `/family/subevents/new?${params.toString()}`;
+          }
+        });
+      }
+    }
+    
+    if (menuItems.length === 0) return;
+    
+    // Create context menu
+    const menu = document.createElement('div');
+    menu.id = 'medium-sorter-context-menu';
+    menu.className = 'context-menu';
+    
+    menuItems.forEach(menuItem => {
+      const menuItemElement = document.createElement('div');
+      menuItemElement.className = 'context-menu-item';
+      menuItemElement.textContent = menuItem.label;
+      menuItemElement.addEventListener('click', (e) => {
+        e.stopPropagation();
+        menuItem.action();
+        menu.remove();
+      });
+      menu.appendChild(menuItemElement);
+    });
+    
+    // Position menu at cursor
+    document.body.appendChild(menu);
+    const x = event.clientX;
+    const y = event.clientY;
+    
+    // Adjust position if menu would go off screen
+    const menuRect = menu.getBoundingClientRect();
+    const windowWidth = window.innerWidth;
+    const windowHeight = window.innerHeight;
+    
+    let left = x;
+    let top = y;
+    
+    if (x + menuRect.width > windowWidth) {
+      left = windowWidth - menuRect.width - 5;
+    }
+    if (y + menuRect.height > windowHeight) {
+      top = windowHeight - menuRect.height - 5;
+    }
+    
+    menu.style.left = left + 'px';
+    menu.style.top = top + 'px';
+    
+    // Close menu on outside click
+    const closeMenu = (e) => {
+      if (!menu.contains(e.target)) {
+        menu.remove();
+        document.removeEventListener('click', closeMenu);
+      }
+    };
+    
+    // Wait for current event to finish before adding click listener
+    setTimeout(() => {
+      document.addEventListener('click', closeMenu);
+    }, 0);
+  }
+  
   function filterByYear(items, year) {
     const startDate = new Date(year, 0, 1);
     const endDate = new Date(year, 11, 31, 23, 59, 59);
@@ -977,4 +1218,5 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
     return filterByDateRange(items, startDate, endDate);
   }
 })();
+
 

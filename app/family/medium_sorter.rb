@@ -8,7 +8,9 @@ ActiveAdmin.register_page "MediumSorter", namespace: :family do
       javascript_include_tag 'active_admin', 'data-turbo-track': 'reload'
     end
     
-    div id: "medium-sorter-container", data: { multi_photos_path: image_path('multi_photos.png') } do
+    div id: "medium-sorter-container", data: { 
+      multi_photos_path: image_path('multi_photos.png')
+    } do
       # Container for three listboxes will be rendered by JavaScript
       div id: "medium-sorter-content" do
         para "Loading media..."
@@ -28,7 +30,12 @@ ActiveAdmin.register_page "MediumSorter", namespace: :family do
     # Build data for event hierarchy media
     event_media = Medium.where(storage_state: [:event_root, :subevent_level1, :subevent_level2])
                         .includes(:event, :subevent, :user, :uploaded_by)
-    event_data = build_event_hierarchy(event_media)
+    # Get all events that have media or have subevents (even if empty)
+    event_ids_from_media = event_media.map(&:event_id).compact.uniq
+    event_ids_with_subevents = Event.joins(:subevents).distinct.pluck(:id)
+    all_event_ids = (event_ids_from_media + event_ids_with_subevents).uniq
+    all_events_with_subevents = Event.where(id: all_event_ids).includes(:subevents)
+    event_data = build_event_hierarchy(event_media, all_events_with_subevents)
 
     render json: {
       unsorted: unsorted_data,
@@ -118,11 +125,39 @@ ActiveAdmin.register_page "MediumSorter", namespace: :family do
       end.compact
     end
 
-    def build_event_hierarchy(media)
+    def build_event_hierarchy(media, events = nil)
       # Group by event -> subevent -> media
       hierarchy = {}
       
-      # First, organize media by event
+      # If events are provided, initialize all events with their subevents first
+      if events
+        events.each do |event|
+          event_id = event.id
+          hierarchy[event_id] = {
+            id: event_id,
+            title: event.title,
+            start_date: event.start_date,
+            end_date: event.end_date,
+            duration_days: event.duration_days,
+            root_media: [],
+            subevents: {}
+          }
+          
+          # Initialize all subevents for this event (even empty ones)
+          event.subevents.each do |subevent|
+            hierarchy[event_id][:subevents][subevent.id] = {
+              id: subevent.id,
+              title: subevent.title,
+              parent_id: subevent.parent_subevent_id,
+              depth: subevent.depth,
+              event_id: event_id,  # Include event_id for navigation
+              media: []
+            }
+          end
+        end
+      end
+      
+      # Now organize media by event and subevent
       media.each do |medium|
         next unless medium.event
         
@@ -130,6 +165,7 @@ ActiveAdmin.register_page "MediumSorter", namespace: :family do
         event = medium.event
         event_title = event.title
         
+        # Initialize event if not already done
         hierarchy[event_id] ||= {
           id: event_id,
           title: event_title,
@@ -177,7 +213,7 @@ ActiveAdmin.register_page "MediumSorter", namespace: :family do
           subevent_title = medium.subevent.title
           parent_subevent_id = medium.subevent.parent_subevent_id
           
-          # Create subevent entry if it doesn't exist
+          # Create subevent entry if it doesn't exist (should already exist if events were preloaded)
           hierarchy[event_id][:subevents][subevent_id] ||= {
             id: subevent_id,
             title: subevent_title,
@@ -293,7 +329,13 @@ ActiveAdmin.register_page "MediumSorter", namespace: :family do
                   key: "medium_#{item[:id]}",
                   data: item
                 }
-              end
+              end,
+              data: {
+                subevent_id: child[:id],
+                event_id: child[:event_id],
+                parent_id: child[:parent_id],
+                title: child[:title]
+              }
             }
           end)
         end
@@ -302,7 +344,13 @@ ActiveAdmin.register_page "MediumSorter", namespace: :family do
           type: 'subevent_l1',
           label: subevent[:title],
           key: "subevent_#{subevent[:id]}",
-          children: children
+          children: children,
+          data: {
+            subevent_id: subevent[:id],
+            event_id: subevent[:event_id],
+            parent_id: subevent[:parent_id],
+            title: subevent[:title]
+          }
         }
       end
     end

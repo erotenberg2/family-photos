@@ -21,6 +21,13 @@ module Constants
   VIDEO_ICON = "🎬"
   FILE_ICON = "📄"
   
+  # Storage state icons  NOTE CHANGES MADE HERE MUST ALSO BE REFLECTED IN MEDIUM_SORTER.JS 
+  UNSORTED_ICON = "📥"
+  DAILY_ICON = "📅"
+  EVENT_ROOT_ICON = "✈️"
+  SUBEVENT_LEVEL1_ICON = "✈️📂"
+  SUBEVENT_LEVEL2_ICON = "✈️📂📂"
+  
   # Icon mapping by medium type
   MEDIUM_TYPE_ICONS = {
     'photo' => CAMERA_ICON,
@@ -30,5 +37,22 @@ module Constants
   
   def self.icon_for_medium_type(medium_type)
     MEDIUM_TYPE_ICONS[medium_type] || FILE_ICON
+  end
+  
+  def self.icon_for_storage_state(storage_state)
+    case storage_state.to_sym
+    when :unsorted
+      UNSORTED_ICON
+    when :daily
+      DAILY_ICON
+    when :event_root
+      EVENT_ROOT_ICON
+    when :subevent_level1
+      SUBEVENT_LEVEL1_ICON
+    when :subevent_level2
+      SUBEVENT_LEVEL2_ICON
+    else
+      ""
+    end
   end
 end

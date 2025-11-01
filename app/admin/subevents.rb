@@ -114,15 +114,15 @@ ActiveAdmin.register Subevent do
           column "Storage" do |medium|
             case medium.aasm.current_state
             when :unsorted
-              content_tag :div, "📂", style: "font-size: 16px; text-align: center;", title: "Unsorted storage"
+              content_tag :div, Constants::UNSORTED_ICON, style: "font-size: 16px; text-align: center;", title: "Unsorted storage"
             when :daily
-              content_tag :div, "📅", style: "font-size: 16px; text-align: center;", title: "Daily storage"
+              content_tag :div, Constants::DAILY_ICON, style: "font-size: 16px; text-align: center;", title: "Daily storage"
             when :event_root
-              content_tag :div, "✈️", style: "font-size: 16px; text-align: center;", title: "Event storage"
+              content_tag :div, Constants::EVENT_ROOT_ICON, style: "font-size: 16px; text-align: center;", title: "Event storage"
             when :subevent_level1
-              content_tag :div, "✈️📂", style: "font-size: 16px; text-align: center;", title: "Subevent level 1"
+              content_tag :div, Constants::SUBEVENT_LEVEL1_ICON, style: "font-size: 16px; text-align: center;", title: "Subevent level 1"
             when :subevent_level2
-              content_tag :div, "✈️📂📂", style: "font-size: 16px; text-align: center;", title: "Subevent level 2"
+              content_tag :div, Constants::SUBEVENT_LEVEL2_ICON, style: "font-size: 16px; text-align: center;", title: "Subevent level 2"
             end
           end
           column "Actions" do |medium|

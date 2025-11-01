@@ -101,15 +101,15 @@ ActiveAdmin.register Event, namespace: :family, as: 'Events' do
           column "Storage" do |medium|
             case medium.aasm.current_state
             when :unsorted
-              content_tag :div, "📂", style: "font-size: 16px; text-align: center;", title: "Unsorted storage"
+              content_tag :div, Constants::UNSORTED_ICON, style: "font-size: 16px; text-align: center;", title: "Unsorted storage"
             when :daily
-              content_tag :div, "📅", style: "font-size: 16px; text-align: center;", title: "Daily storage"
+              content_tag :div, Constants::DAILY_ICON, style: "font-size: 16px; text-align: center;", title: "Daily storage"
             when :event_root
-              content_tag :div, "✈️", style: "font-size: 16px; text-align: center;", title: "Event storage"
+              content_tag :div, Constants::EVENT_ROOT_ICON, style: "font-size: 16px; text-align: center;", title: "Event storage"
             when :subevent_level1
-              content_tag :div, "✈️📂", style: "font-size: 16px; text-align: center;", title: "Subevent level 1"
+              content_tag :div, Constants::SUBEVENT_LEVEL1_ICON, style: "font-size: 16px; text-align: center;", title: "Subevent level 1"
             when :subevent_level2
-              content_tag :div, "✈️📂📂", style: "font-size: 16px; text-align: center;", title: "Subevent level 2"
+              content_tag :div, Constants::SUBEVENT_LEVEL2_ICON, style: "font-size: 16px; text-align: center;", title: "Subevent level 2"
             end
           end
           column "Actions" do |medium|
@@ -154,18 +154,18 @@ ActiveAdmin.register Event, namespace: :family, as: 'Events' do
     f.inputs "Event Details" do
       f.input :title
       
-      # Only show date fields for existing events
-      if f.object.persisted?
-        f.input :start_date, as: :date_picker
-        f.input :end_date, as: :date_picker
-      end
+      # # Only show date fields for existing events
+      # if f.object.persisted?
+      #   f.input :start_date, as: :date_picker
+      #   f.input :end_date, as: :date_picker
+      # end
       
       f.input :description, as: :text
       
       # Only show created_by for existing events
-      if f.object.persisted?
-        f.input :created_by, as: :select, collection: User.all.map { |u| [u.email, u.id] }
-      end
+      # if f.object.persisted?
+      #   f.input :created_by, as: :select, collection: User.all.map { |u| [u.email, u.id] }
+      # end
     end
     f.actions
   end

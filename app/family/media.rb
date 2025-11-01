@@ -99,15 +99,15 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
     column "Storage State", sortable: :storage_state do |medium|
       case medium.aasm.current_state
       when :unsorted
-        content_tag :div, "📥", style: "font-size: 18px; text-align: center;", title: "Unsorted storage"
+        content_tag :div, Constants::UNSORTED_ICON, style: "font-size: 18px; text-align: center;", title: "Unsorted storage"
       when :daily
-        content_tag :div, "📅", style: "font-size: 18px; text-align: center;", title: "Daily storage"
+        content_tag :div, Constants::DAILY_ICON, style: "font-size: 18px; text-align: center;", title: "Daily storage"
       when :event_root
-        content_tag :div, "✈️", style: "font-size: 18px; text-align: center;", title: "Event storage"
+        content_tag :div, Constants::EVENT_ROOT_ICON, style: "font-size: 18px; text-align: center;", title: "Event storage"
       when :subevent_level1
-        content_tag :div, "✈️📂", style: "font-size: 18px; text-align: center;", title: "Subevent level 1 storage"
+        content_tag :div, Constants::SUBEVENT_LEVEL1_ICON, style: "font-size: 18px; text-align: center;", title: "Subevent level 1 storage"
       when :subevent_level2
-        content_tag :div, "✈️📂📂", style: "font-size: 18px; text-align: center;", title: "Subevent level 2 storage"
+        content_tag :div, Constants::SUBEVENT_LEVEL2_ICON, style: "font-size: 18px; text-align: center;", title: "Subevent level 2 storage"
       end
     end
     column "Transitions", sortable: false do |medium|
@@ -488,15 +488,15 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
       row "Storage State" do |medium|
         case medium.aasm.current_state
         when :unsorted
-          content_tag :div, "📂 Unsorted Storage", style: "font-size: 16px;", title: "Stored in unsorted organization structure"
+          content_tag :div, "#{Constants::UNSORTED_ICON} Unsorted Storage", style: "font-size: 16px;", title: "Stored in unsorted organization structure"
         when :daily
-          content_tag :div, "📅 Daily Storage", style: "font-size: 16px;", title: "Stored in daily organization structure"
+          content_tag :div, "#{Constants::DAILY_ICON} Daily Storage", style: "font-size: 16px;", title: "Stored in daily organization structure"
         when :event_root
-          content_tag :div, "✈️ Event Root Storage", style: "font-size: 16px;", title: "Stored in event organization structure"
+          content_tag :div, "#{Constants::EVENT_ROOT_ICON} Event Root Storage", style: "font-size: 16px;", title: "Stored in event organization structure"
         when :subevent_level1
-          content_tag :div, "✈️📂 Subevent Level 1", style: "font-size: 16px;", title: "Stored in subevent level 1"
+          content_tag :div, "#{Constants::SUBEVENT_LEVEL1_ICON} Subevent Level 1", style: "font-size: 16px;", title: "Stored in subevent level 1"
         when :subevent_level2
-          content_tag :div, "✈️📂📂 Subevent Level 2", style: "font-size: 16px;", title: "Stored in subevent level 2"
+          content_tag :div, "#{Constants::SUBEVENT_LEVEL2_ICON} Subevent Level 2", style: "font-size: 16px;", title: "Stored in subevent level 2"
         end
       end
       row :storage_state
