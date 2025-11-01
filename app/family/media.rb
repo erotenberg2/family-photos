@@ -99,7 +99,7 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
     column "Storage State", sortable: :storage_state do |medium|
       case medium.aasm.current_state
       when :unsorted
-        content_tag :div, "📂", style: "font-size: 18px; text-align: center;", title: "Unsorted storage"
+        content_tag :div, "📥", style: "font-size: 18px; text-align: center;", title: "Unsorted storage"
       when :daily
         content_tag :div, "📅", style: "font-size: 18px; text-align: center;", title: "Daily storage"
       when :event_root
