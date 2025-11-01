@@ -68,15 +68,17 @@ ActiveAdmin.register Photo, namespace: :family do
       photo.file_size_human
     end
     column "Storage", sortable: false do |photo|
-      case photo.medium.storage_class
-      when 'daily'
-        content_tag :div, "📅", style: "font-size: 18px; text-align: center;", title: "Daily storage"
-      when 'event'
-        content_tag :div, "✈️", style: "font-size: 18px; text-align: center;", title: "Event storage"
-      when 'unsorted'
+      case photo.medium.aasm.current_state
+      when :unsorted
         content_tag :div, "📂", style: "font-size: 18px; text-align: center;", title: "Unsorted storage"
-      else
-        content_tag :div, "❓", style: "font-size: 18px; text-align: center;", title: "Unknown storage"
+      when :daily
+        content_tag :div, "📅", style: "font-size: 18px; text-align: center;", title: "Daily storage"
+      when :event_root
+        content_tag :div, "✈️", style: "font-size: 18px; text-align: center;", title: "Event storage"
+      when :subevent_level1
+        content_tag :div, "✈️📂", style: "font-size: 18px; text-align: center;", title: "Subevent level 1"
+      when :subevent_level2
+        content_tag :div, "✈️📂📂", style: "font-size: 18px; text-align: center;", title: "Subevent level 2"
       end
     end
     column :camera_make
@@ -172,16 +174,18 @@ ActiveAdmin.register Photo, namespace: :family do
           content_tag :div, "No date available", style: "color: #cc0000; font-weight: bold;"
         end
       end
-      row "Storage Class" do |photo|
-        case photo.medium.storage_class
-        when 'daily'
-          content_tag :div, "📅 Daily Storage", style: "font-size: 16px;", title: "Stored in daily organization structure"
-        when 'event'
-          content_tag :div, "✈️ Event Storage", style: "font-size: 16px;", title: "Stored in event organization structure"
-        when 'unsorted'
+      row "Storage State" do |photo|
+        case photo.medium.aasm.current_state
+        when :unsorted
           content_tag :div, "📂 Unsorted Storage", style: "font-size: 16px;", title: "Stored in unsorted organization structure"
-        else
-          content_tag :div, "❓ Unknown Storage", style: "font-size: 16px;", title: "Unknown storage class"
+        when :daily
+          content_tag :div, "📅 Daily Storage", style: "font-size: 16px;", title: "Stored in daily organization structure"
+        when :event_root
+          content_tag :div, "✈️ Event Root", style: "font-size: 16px;", title: "Stored in event organization structure"
+        when :subevent_level1
+          content_tag :div, "✈️📂 Subevent L1", style: "font-size: 16px;", title: "Stored in subevent level 1"
+        when :subevent_level2
+          content_tag :div, "✈️📂📂 Subevent L2", style: "font-size: 16px;", title: "Stored in subevent level 2"
         end
       end
       row "Event" do |photo|

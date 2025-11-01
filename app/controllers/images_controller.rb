@@ -8,7 +8,7 @@ class ImagesController < ApplicationController
     Rails.logger.info "Medium file_path: #{@medium.file_path}"
     Rails.logger.info "Medium current_filename: #{@medium.current_filename}"
     Rails.logger.info "Medium full_file_path: #{@medium.full_file_path}"
-    Rails.logger.info "Medium storage_class: #{@medium.storage_class}"
+    Rails.logger.info "Medium storage_state: #{@medium.aasm.current_state}"
     Rails.logger.info "File exists: #{File.exist?(@medium.full_file_path) if @medium.full_file_path}"
     
     if @medium.full_file_path && File.exist?(@medium.full_file_path)

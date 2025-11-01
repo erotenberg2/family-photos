@@ -15,13 +15,6 @@ class Medium < ApplicationRecord
     video: 'video'
   }
   
-  # Enum for storage classes
-  enum :storage_class, {
-    unsorted: 'unsorted',
-    daily: 'daily',
-    event: 'event'
-  }
-  
   # Validations for generic media attributes
   # TODO: file_path is being deprecated in favor of computed paths
   validates :current_filename, presence: true, uniqueness: true
@@ -91,7 +84,7 @@ class Medium < ApplicationRecord
   def self.ransackable_attributes(auth_object = nil)
     ["client_file_path", "content_type", "created_at", "current_filename", "datetime_inferred", "datetime_intrinsic", "datetime_source_last_modified", 
      "datetime_user", "event_id", "file_size", "id", "latitude", "longitude", "md5_hash", "medium_type", "original_filename", 
-     "storage_class", "subevent_id", "updated_at", "uploaded_by_id", "user_id"]
+     "storage_state", "subevent_id", "updated_at", "uploaded_by_id", "user_id"]
   end
 
   def self.ransackable_associations(auth_object = nil)
@@ -110,7 +103,7 @@ class Medium < ApplicationRecord
             id: medium.id,
             original_filename: medium.original_filename,
             file_path: medium.full_file_path,
-            storage_class: medium.storage_class,
+            storage_state: medium.aasm.current_state,
             event_id: medium.event_id,
             subevent_id: medium.subevent_id
           }
@@ -122,7 +115,7 @@ class Medium < ApplicationRecord
     missing_files.each do |missing|
       Rails.logger.info "Medium #{missing[:id]}: #{missing[:original_filename]}"
       Rails.logger.info "  Expected at: #{missing[:file_path]}"
-      Rails.logger.info "  Storage class: #{missing[:storage_class]}"
+      Rails.logger.info "  Storage state: #{missing[:storage_state]}"
       Rails.logger.info "  Event ID: #{missing[:event_id]}, Subevent ID: #{missing[:subevent_id]}"
     end
     
@@ -263,25 +256,13 @@ class Medium < ApplicationRecord
         new_path = found_files.first
         Rails.logger.info "Found file at: #{new_path}"
         
-        # Determine correct storage class and state based on path
-        new_storage_class = if new_path.include?('/unsorted/')
-          'unsorted'
-        elsif new_path.include?('/daily/')
-          'daily'
-        elsif new_path.include?('/events/')
-          'event'
-        else
-          'unsorted' # fallback
-        end
-        
-        # Update storage_class only - file_path is computed from state
+        # Paths are now computed from state - just reset associations
         medium.update!(
-          storage_class: new_storage_class,
           event_id: nil, # Reset event associations since we're fixing orphaned records
           subevent_id: nil
         )
         
-        Rails.logger.info "✅ Fixed Medium #{medium.id} - updated storage class to: #{new_storage_class}"
+        Rails.logger.info "✅ Fixed Medium #{medium.id} - reset associations"
         fixed_count += 1
       else
         Rails.logger.warn "❌ Could not find file for Medium #{medium.id}: #{medium.original_filename}"
@@ -378,15 +359,15 @@ class Medium < ApplicationRecord
     effective_datetime || created_at
   end
 
-  # Get the appropriate storage base path based on storage_class
+  # Get the appropriate storage base path based on storage_state
   def storage_base_path
     require_relative '../../lib/constants'
-    case storage_class
-    when 'unsorted'
+    case aasm.current_state
+    when :unsorted
       Constants::UNSORTED_STORAGE
-    when 'daily'
+    when :daily
       Constants::DAILY_STORAGE
-    when 'event'
+    when :event_root, :subevent_level1, :subevent_level2
       Constants::EVENTS_STORAGE
     else
       Constants::UNSORTED_STORAGE
@@ -545,8 +526,7 @@ class Medium < ApplicationRecord
       upload_started_at: upload_started_at,
       upload_completed_at: upload_completed_at,
       upload_batch_id: batch_id,
-      upload_session_id: session_id,
-      storage_class: 'unsorted'  # Default to unsorted storage
+      upload_session_id: session_id
     )
     
     if medium.save

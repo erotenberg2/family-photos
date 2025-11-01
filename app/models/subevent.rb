@@ -239,7 +239,6 @@ class Subevent < ApplicationRecord
             # Update the medium record - keep in event but remove subevent association
             medium.update!(
               current_filename: File.basename(new_path),
-              storage_class: 'event',
               event_id: event.id,
               subevent_id: nil
             )
@@ -260,7 +259,6 @@ class Subevent < ApplicationRecord
           # Still update the database record even if file is missing
           medium.update!(
             current_filename: medium.current_filename,
-            storage_class: 'event',
             event_id: event.id,
             subevent_id: nil
           )

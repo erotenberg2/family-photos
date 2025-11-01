@@ -11,7 +11,7 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
 
   # Permitted parameters
   permit_params :file_path, :file_size, :original_filename, :content_type, :md5_hash,
-                :datetime_user, :datetime_intrinsic, :datetime_inferred, :medium_type, :storage_class, :uploaded_by_id, :user_id, :descriptive_name
+                :datetime_user, :datetime_intrinsic, :datetime_inferred, :medium_type, :uploaded_by_id, :user_id, :descriptive_name
 
   # Index page configuration
   index do 
@@ -96,19 +96,7 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
       medium.file_size_human
     end
     column :content_type
-    column "Storage Class", sortable: :storage_class do |medium|
-      case medium.storage_class
-      when 'daily'
-        content_tag :div, "📅", style: "font-size: 18px; text-align: center;", title: "Daily storage"
-      when 'event'
-        content_tag :div, "✈️", style: "font-size: 18px; text-align: center;", title: "Event storage"
-      when 'unsorted'
-        content_tag :div, "📂", style: "font-size: 18px; text-align: center;", title: "Unsorted storage"
-      else
-        content_tag :div, "❓", style: "font-size: 18px; text-align: center;", title: "Unknown storage"
-      end
-    end
-    column "Storage State" do |medium|
+    column "Storage State", sortable: :storage_state do |medium|
       case medium.aasm.current_state
       when :unsorted
         content_tag :div, "📂", style: "font-size: 18px; text-align: center;", title: "Unsorted storage"
@@ -140,7 +128,7 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
   filter :datetime_user
   filter :datetime_intrinsic
   filter :datetime_inferred
-  filter :storage_class, as: :select, collection: Medium.storage_classes.keys.map { |k| [k.humanize, k] }
+  filter :storage_state, as: :select, collection: [['Unsorted', 'unsorted'], ['Daily', 'daily'], ['Event Root', 'event_root'], ['Subevent Level 1', 'subevent_level1'], ['Subevent Level 2', 'subevent_level2']]
   filter :created_at
 
   # Batch actions
@@ -497,16 +485,18 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
         end
       end
       row :datetime_source_last_modified
-      row "Storage Class" do |medium|
-        case medium.storage_class
-        when 'daily'
-          content_tag :div, "📅 Daily Storage", style: "font-size: 16px;", title: "Stored in daily organization structure"
-        when 'event'
-          content_tag :div, "✈️ Event Storage", style: "font-size: 16px;", title: "Stored in event organization structure"
-        when 'unsorted'
+      row "Storage State" do |medium|
+        case medium.aasm.current_state
+        when :unsorted
           content_tag :div, "📂 Unsorted Storage", style: "font-size: 16px;", title: "Stored in unsorted organization structure"
-        else
-          content_tag :div, "❓ Unknown Storage", style: "font-size: 16px;", title: "Unknown storage class"
+        when :daily
+          content_tag :div, "📅 Daily Storage", style: "font-size: 16px;", title: "Stored in daily organization structure"
+        when :event_root
+          content_tag :div, "✈️ Event Root Storage", style: "font-size: 16px;", title: "Stored in event organization structure"
+        when :subevent_level1
+          content_tag :div, "✈️📂 Subevent Level 1", style: "font-size: 16px;", title: "Stored in subevent level 1"
+        when :subevent_level2
+          content_tag :div, "✈️📂📂 Subevent Level 2", style: "font-size: 16px;", title: "Stored in subevent level 2"
         end
       end
       row :storage_state

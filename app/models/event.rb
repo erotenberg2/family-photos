@@ -311,7 +311,6 @@ class Event < ApplicationRecord
             # Update the medium record
             medium.update!(
               current_filename: File.basename(new_path),
-              storage_class: 'unsorted',
               event_id: nil,
               subevent_id: nil
             )
@@ -332,7 +331,6 @@ class Event < ApplicationRecord
           # Still update the database record even if file is missing
           medium.update!(
             current_filename: medium.current_filename,
-            storage_class: 'unsorted',
             event_id: nil,
             subevent_id: nil
           )

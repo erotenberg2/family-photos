@@ -59,7 +59,7 @@ class FileOrganizationService
         FileUtils.mv(medium.full_file_path, new_path)
         
         # Update the database record
-        medium.update!(file_path: Constants::UNSORTED_STORAGE, current_filename: current_filename, storage_class: 'unsorted')
+        medium.update!(file_path: Constants::UNSORTED_STORAGE, current_filename: current_filename)
         
         Rails.logger.info "  ✅ Moved Medium #{medium.id} to unsorted: #{new_path}"
         
@@ -70,7 +70,7 @@ class FileOrganizationService
       else
         Rails.logger.warn "  ⚠️ File not found: #{medium.full_file_path}"
         # Still update the database record
-        medium.update!(file_path: Constants::UNSORTED_STORAGE, current_filename: current_filename, storage_class: 'unsorted')
+        medium.update!(file_path: Constants::UNSORTED_STORAGE, current_filename: current_filename)
         false
       end
     rescue => e
@@ -102,7 +102,7 @@ class FileOrganizationService
         FileUtils.mv(medium.full_file_path, new_path)
         
         # Update the database record
-        medium.update!(file_path: File.dirname(new_path), current_filename: File.basename(new_path), storage_class: 'daily')
+        medium.update!(file_path: File.dirname(new_path), current_filename: File.basename(new_path))
         
         Rails.logger.info "  ✅ Moved Medium #{medium.id} to daily: #{new_path}"
         
@@ -140,14 +140,14 @@ class FileOrganizationService
         
         if medium.full_file_path == new_path
           # File is already in the correct location, just update the database
-          medium.update!(file_path: File.dirname(new_path), current_filename: File.basename(new_path), storage_class: 'event', event_id: event_id)
+          medium.update!(file_path: File.dirname(new_path), current_filename: File.basename(new_path), event_id: event_id)
           Rails.logger.info "  ✅ File already in correct location, updated database"
         else
           # File needs to be moved
           FileUtils.mv(medium.full_file_path, new_path)
           
           # Update the database record
-          medium.update!(file_path: File.dirname(new_path), current_filename: File.basename(new_path), storage_class: 'event', event_id: event_id)
+          medium.update!(file_path: File.dirname(new_path), current_filename: File.basename(new_path), event_id: event_id)
           
           Rails.logger.info "  ✅ Moved Medium #{medium.id} to event: #{new_path}"
           
@@ -198,14 +198,14 @@ class FileOrganizationService
         
         if medium.full_file_path == new_path
           # File is already in the correct location, just update the database
-          medium.update!(file_path: File.dirname(new_path), current_filename: File.basename(new_path), storage_class: 'event', event_id: event.id, subevent_id: subevent_id)
+          medium.update!(file_path: File.dirname(new_path), current_filename: File.basename(new_path), event_id: event.id, subevent_id: subevent_id)
           Rails.logger.info "  ✅ File already in correct location, updated database"
         else
           # File needs to be moved
           FileUtils.mv(medium.full_file_path, new_path)
           
           # Update the database record
-          medium.update!(file_path: File.dirname(new_path), current_filename: File.basename(new_path), storage_class: 'event', event_id: event.id, subevent_id: subevent_id)
+          medium.update!(file_path: File.dirname(new_path), current_filename: File.basename(new_path), event_id: event.id, subevent_id: subevent_id)
           
           Rails.logger.info "  ✅ Moved Medium #{medium.id} to subevent: #{new_path}"
           
@@ -263,7 +263,7 @@ class FileOrganizationService
             FileUtils.mv(medium.full_file_path, new_path)
             
             # Update the database record
-            medium.update!(file_path: File.dirname(new_path), current_filename: File.basename(new_path), storage_class: 'daily')
+            medium.update!(file_path: File.dirname(new_path), current_filename: File.basename(new_path))
             
             results[:success_count] += 1
             Rails.logger.info "Moved #{medium.original_filename} to daily storage: #{new_path}"
@@ -390,7 +390,7 @@ class FileOrganizationService
           if File.exist?(medium.full_file_path)
             if medium.full_file_path == new_path
               # File is already in the correct location, just update the database
-              medium.update!(file_path: File.dirname(new_path), current_filename: File.basename(new_path), storage_class: 'event', event_id: event_id)
+              medium.update!(file_path: File.dirname(new_path), current_filename: File.basename(new_path), event_id: event_id)
               results[:success_count] += 1
               Rails.logger.info "File #{medium.original_filename} already in correct location, updated database record"
             else
@@ -398,7 +398,7 @@ class FileOrganizationService
               FileUtils.mv(medium.full_file_path, new_path)
               
               # Update the database record
-              medium.update!(file_path: File.dirname(new_path), current_filename: File.basename(new_path), storage_class: 'event', event_id: event_id)
+              medium.update!(file_path: File.dirname(new_path), current_filename: File.basename(new_path), event_id: event_id)
               
               results[:success_count] += 1
               Rails.logger.info "Moved #{medium.original_filename} to event storage: #{new_path}"
@@ -456,7 +456,7 @@ class FileOrganizationService
           if File.exist?(medium.file_path)
             if medium.file_path == new_path
               # File is already in the correct location, just update the database
-              medium.update!(storage_class: 'event', event_id: event.id, subevent_id: subevent_id)
+              medium.update!(event_id: event.id, subevent_id: subevent_id)
               results[:success_count] += 1
               Rails.logger.info "File #{medium.original_filename} already in correct location, updated database record"
             else
@@ -464,7 +464,7 @@ class FileOrganizationService
               FileUtils.mv(medium.file_path, new_path)
               
               # Update the database record
-              medium.update!(file_path: new_path, storage_class: 'event', event_id: event.id, subevent_id: subevent_id)
+              medium.update!(file_path: new_path, event_id: event.id, subevent_id: subevent_id)
               
               results[:success_count] += 1
               Rails.logger.info "Moved #{medium.original_filename} to subevent storage: #{new_path}"

@@ -112,15 +112,17 @@ ActiveAdmin.register Subevent do
             medium.effective_datetime&.strftime("%Y-%m-%d %H:%M") || "No date"
           end
           column "Storage" do |medium|
-            case medium.storage_class
-            when 'daily'
-              content_tag :div, "📅", style: "font-size: 16px; text-align: center;", title: "Daily storage"
-            when 'event'
-              content_tag :div, "✈️", style: "font-size: 16px; text-align: center;", title: "Event storage"
-            when 'unsorted'
+            case medium.aasm.current_state
+            when :unsorted
               content_tag :div, "📂", style: "font-size: 16px; text-align: center;", title: "Unsorted storage"
-            else
-              content_tag :div, "❓", style: "font-size: 16px; text-align: center;", title: "Unknown storage"
+            when :daily
+              content_tag :div, "📅", style: "font-size: 16px; text-align: center;", title: "Daily storage"
+            when :event_root
+              content_tag :div, "✈️", style: "font-size: 16px; text-align: center;", title: "Event storage"
+            when :subevent_level1
+              content_tag :div, "✈️📂", style: "font-size: 16px; text-align: center;", title: "Subevent level 1"
+            when :subevent_level2
+              content_tag :div, "✈️📂📂", style: "font-size: 16px; text-align: center;", title: "Subevent level 2"
             end
           end
           column "Actions" do |medium|

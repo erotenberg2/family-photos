@@ -198,7 +198,7 @@ module MediumAasm
     
     begin
       Rails.logger.info "---- now moving: medium #{id} (#{current_filename})"
-      Rails.logger.info "from_state=#{aasm.current_state} target_state=#{target_state} storage_class=#{storage_class}"
+      Rails.logger.info "from_state=#{aasm.current_state} target_state=#{target_state}"
       Rails.logger.info "source_path=#{full_file_path} exists=#{full_file_path.present? && File.exist?(full_file_path)}"
       # Capture previous event context before any association changes
       @previous_event_id = event_id if instance_variable_get(:@previous_event_id).nil?
@@ -559,20 +559,6 @@ module MediumAasm
       self.subevent = nil
     when :subevent_level1, :subevent_level2
       # both event and subevent should be set before transition
-    end
-    
-    # Update storage_class enum based on state
-    update_storage_class
-  end
-  
-  def update_storage_class
-    case aasm.to_state
-    when :unsorted
-      self.storage_class = :unsorted
-    when :daily
-      self.storage_class = :daily
-    when :event_root, :subevent_level1, :subevent_level2
-      self.storage_class = :event
     end
   end
 
