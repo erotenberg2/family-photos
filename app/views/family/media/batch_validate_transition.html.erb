@@ -1,0 +1,263 @@
+<%= render partial: 'shared/form_styles' %>
+
+<div class="batch-validation-container">
+  <h2>Batch Transition Validation</h2>
+  
+  <% if @target_event %>
+    <div class="target-event-info">
+      <h3>📍 Target Event: <%= @target_event.title %></h3>
+      <p><%= @target_event.description %></p>
+      <p><strong>Date Range:</strong> <%= @target_event.start_date.strftime('%Y-%m-%d') %> to <%= @target_event.end_date.strftime('%Y-%m-%d') %></p>
+    </div>
+  <% end %>
+  
+  <div class="transition-info">
+    <p><strong>Transition:</strong> <%= @batch_transition.to_s.humanize %></p>
+    <p><strong>Selected Files:</strong> <%= @media.count %></p>
+  </div>
+  
+  <div class="validation-summary">
+    <% if @movable_count > 0 && @blocked_count == 0 %>
+      <div class="alert alert-success">
+        <strong>✓ All <%= @movable_count %> media files can be moved</strong>
+      </div>
+    <% elsif @movable_count > 0 && @blocked_count > 0 %>
+      <div class="alert alert-warning">
+        <strong>⚠ <%= @movable_count %> files can be moved, but <%= @blocked_count %> files are blocked</strong>
+      </div>
+    <% else %>
+      <div class="alert alert-danger">
+        <strong>✗ None of the selected files can be moved</strong>
+      </div>
+    <% end %>
+  </div>
+  
+  <div class="media-list">
+    <table class="validation-table">
+      <thead>
+        <tr>
+          <th>Status</th>
+          <th>Filename</th>
+          <th>Current State</th>
+          <th>Reason</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% @validation_results.each do |result| %>
+          <tr class="<%= result[:can_transition] ? 'can-move' : 'blocked' %>">
+            <td class="status-cell">
+              <% if result[:can_transition] %>
+                <span class="status-icon success">✓</span>
+              <% else %>
+                <span class="status-icon blocked">✗</span>
+              <% end %>
+            </td>
+            <td class="filename-cell">
+              <%= result[:medium].current_filename %>
+            </td>
+            <td class="state-cell">
+              <%= result[:medium].storage_state.to_s.humanize %>
+            </td>
+            <td class="reason-cell">
+              <% if result[:can_transition] %>
+                <span class="text-success">Ready to move</span>
+              <% else %>
+                <span class="text-danger"><%= result[:reason] || 'Cannot transition' %></span>
+              <% end %>
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  </div>
+  
+  <div class="action-buttons">
+    <% if @movable_count > 0 %>
+      <% if ['move_to_daily', 'move_to_unsorted'].include?(@batch_transition) %>
+        <%# Direct transition - execute immediately %>
+        <%= form_tag batch_execute_transition_family_media_path, method: :post do %>
+          <%= hidden_field_tag :move_blocked, false %>
+          <%= submit_tag "Move #{@movable_count} Valid Files", class: 'btn btn-primary' %>
+        <% end %>
+      <% elsif @target_event %>
+        <%# Event already selected, execute transition %>
+        <%= form_tag batch_complete_transition_family_media_path, method: :post do %>
+          <%= submit_tag "Move #{@movable_count} Files to Event", class: 'btn btn-primary' %>
+        <% end %>
+      <% else %>
+        <%# Event/subevent transition - need to select destination %>
+        <%= link_to "Select Destination for #{@movable_count} Files", 
+                    batch_select_destination_family_media_path, 
+                    class: 'btn btn-primary' %>
+      <% end %>
+    <% end %>
+    
+    <%= link_to "Cancel", collection_path, class: 'btn btn-secondary' %>
+  </div>
+</div>
+
+<style>
+.batch-validation-container {
+  max-width: 1200px;
+  margin: 20px auto;
+  padding: 20px;
+}
+
+.target-event-info {
+  background: #e7f3ff;
+  border: 2px solid #007bff;
+  padding: 15px;
+  border-radius: 4px;
+  margin-bottom: 20px;
+}
+
+.target-event-info h3 {
+  margin-top: 0;
+  color: #007bff;
+}
+
+.target-event-info p {
+  margin: 5px 0;
+}
+
+.transition-info {
+  background: #f8f9fa;
+  padding: 15px;
+  border-radius: 4px;
+  margin-bottom: 20px;
+}
+
+.transition-info p {
+  margin: 5px 0;
+}
+
+.validation-summary {
+  margin-bottom: 20px;
+}
+
+.alert {
+  padding: 15px;
+  border-radius: 4px;
+  margin-bottom: 15px;
+}
+
+.alert-success {
+  background-color: #d4edda;
+  border: 1px solid #c3e6cb;
+  color: #155724;
+}
+
+.alert-warning {
+  background-color: #fff3cd;
+  border: 1px solid #ffeeba;
+  color: #856404;
+}
+
+.alert-danger {
+  background-color: #f8d7da;
+  border: 1px solid #f5c6cb;
+  color: #721c24;
+}
+
+.validation-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: white;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  margin-bottom: 20px;
+}
+
+.validation-table thead {
+  background: #f8f9fa;
+}
+
+.validation-table th {
+  padding: 12px;
+  text-align: left;
+  font-weight: 600;
+  border-bottom: 2px solid #dee2e6;
+}
+
+.validation-table td {
+  padding: 12px;
+  border-bottom: 1px solid #dee2e6;
+}
+
+.validation-table tr.can-move {
+  background-color: #f8fff8;
+}
+
+.validation-table tr.blocked {
+  background-color: #fff8f8;
+}
+
+.status-icon {
+  font-size: 18px;
+  font-weight: bold;
+}
+
+.status-icon.success {
+  color: #28a745;
+}
+
+.status-icon.blocked {
+  color: #dc3545;
+}
+
+.filename-cell {
+  font-family: monospace;
+  font-size: 13px;
+}
+
+.state-cell {
+  color: #6c757d;
+  font-size: 13px;
+}
+
+.reason-cell {
+  font-size: 13px;
+}
+
+.text-success {
+  color: #28a745;
+}
+
+.text-danger {
+  color: #dc3545;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.btn {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  text-decoration: none;
+  display: inline-block;
+}
+
+.btn-primary {
+  background-color: #007bff;
+  color: white;
+}
+
+.btn-primary:hover {
+  background-color: #0056b3;
+}
+
+.btn-secondary {
+  background-color: #6c757d;
+  color: white;
+}
+
+.btn-secondary:hover {
+  background-color: #545b62;
+}
+</style>
+

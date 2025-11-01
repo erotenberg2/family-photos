@@ -165,96 +165,40 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
     end
   end
 
-  batch_action :move_to_daily, confirm: "Move selected media files to daily storage (organized by date)?" do |ids|
-    success_count = 0
-    error_count = 0
-    errors = []
-    
-    ids.each do |media_id|
-      begin
-        medium = Medium.find(media_id)
-        if FileOrganizationService.move_single_to_daily(medium)
-          # Trigger the state machine transition to update storage_state
-          medium.move_to_daily! if medium.may_move_to_daily?
-          success_count += 1
-        else
-          errors << "Failed to move medium #{media_id}"
-          error_count += 1
-        end
-      rescue => e
-        errors << "Error processing medium #{media_id}: #{e.message}"
-        error_count += 1
-      end
-    end
-    
-    if error_count == 0
-      redirect_to collection_path, notice: "Successfully moved #{success_count} files to daily storage."
-    elsif success_count > 0
-      redirect_to collection_path, 
-                  alert: "Moved #{success_count} files, but encountered #{error_count} errors: #{errors.join(', ')}"
-    else
-      redirect_to collection_path, alert: "Failed to move files: #{errors.join(', ')}"
-    end
+  batch_action :move_to_unsorted do |ids|
+    # Clear any previous batch session data
+    session.delete(:batch_target_event_id)
+    # Store selected IDs and redirect to validation page
+    session[:batch_media_ids] = ids
+    session[:batch_transition] = 'move_to_unsorted'
+    redirect_to batch_validate_transition_family_media_path
+  end
+
+  batch_action :move_to_daily do |ids|
+    # Clear any previous batch session data
+    session.delete(:batch_target_event_id)
+    # Store selected IDs and redirect to validation page
+    session[:batch_media_ids] = ids
+    session[:batch_transition] = 'move_to_daily'
+    redirect_to batch_validate_transition_family_media_path
   end
 
   batch_action :group_to_new_event do |ids|
-    # Store the selected media IDs in the session for the form
-    session[:selected_media_ids] = ids
-    
-    # Get date range from selected media for display
-    media = Medium.where(id: ids)
-    dates = media.map(&:effective_datetime).compact
-    
-    if dates.empty?
-      redirect_to collection_path, alert: "No media with valid dates selected. Cannot create event without date information."
-      return
-    end
-    
-    earliest_date = dates.min.to_date
-    latest_date = dates.max.to_date
-    
-    # Redirect to the form page
-    redirect_to new_event_from_media_family_media_path, 
-                notice: "Please provide a name for the new event (Date range: #{earliest_date.strftime('%Y-%m-%d')} to #{latest_date.strftime('%Y-%m-%d')})"
+    # Clear any previous batch session data
+    session.delete(:batch_target_event_id)
+    # Store selected IDs and redirect to new event form
+    session[:batch_media_ids] = ids
+    session[:batch_transition] = 'move_to_event'
+    redirect_to new_family_event_path(batch_media_ids: ids.join(','))
   end
 
   batch_action :add_to_existing_event do |ids|
-    # Store the selected media IDs in the session for the form
-    session[:selected_media_ids_for_existing] = ids
-    
-    # Get date range from selected media for display
-    media = Medium.where(id: ids)
-    dates = media.map(&:effective_datetime).compact
-    
-    Rails.logger.info "=== DEBUGGING ADD TO EXISTING EVENT DATE RANGE ==="
-    Rails.logger.info "Selected media count: #{media.count}"
-    Rails.logger.info "Media with effective_datetime: #{dates.count}"
-    
-    media.each_with_index do |medium, index|
-      Rails.logger.info "Medium #{index + 1} (ID: #{medium.id}):"
-      Rails.logger.info "  - datetime_user: #{medium.datetime_user}"
-      Rails.logger.info "  - datetime_intrinsic: #{medium.datetime_intrinsic}"
-      Rails.logger.info "  - datetime_inferred: #{medium.datetime_inferred}"
-      Rails.logger.info "  - effective_datetime: #{medium.effective_datetime}"
-      Rails.logger.info "  - datetime_source: #{medium.datetime_source}"
-    end
-    
-    if dates.empty?
-      redirect_to collection_path, alert: "No media with valid dates selected. Cannot add to event without date information."
-      return
-    end
-    
-    earliest_date = dates.min.to_date
-    latest_date = dates.max.to_date
-    
-    Rails.logger.info "Date range calculation:"
-    Rails.logger.info "  - Earliest date: #{earliest_date}"
-    Rails.logger.info "  - Latest date: #{latest_date}"
-    Rails.logger.info "=== END DEBUGGING ADD TO EXISTING EVENT DATE RANGE ==="
-    
-    # Redirect to the form page
-    redirect_to add_to_existing_event_family_media_path, 
-                notice: "Please select an existing event to add the media to (Date range: #{earliest_date.strftime('%Y-%m-%d')} to #{latest_date.strftime('%Y-%m-%d')})"
+    # Clear any previous batch session data
+    session.delete(:batch_target_event_id)
+    # Store selected IDs and redirect to event selection page
+    session[:batch_media_ids] = ids
+    session[:batch_transition] = 'move_to_event'
+    redirect_to batch_select_event_family_media_path
   end
 
   # Custom actions
@@ -737,6 +681,40 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
       # Create new filename: YYYYMMDD_HHMMSS-descriptive_name.extension
       "#{timestamp}-#{descriptive_name}#{extension}"
     end
+    
+    # Helper to determine the correct transition name based on current state
+    def determine_transition_for_medium(medium, base_transition)
+      current_state = medium.storage_state.to_sym
+      
+      case base_transition
+      when 'move_to_unsorted'
+        case current_state
+        when :daily then 'move_daily_to_unsorted'
+        when :event_root then 'move_event_to_unsorted'
+        when :subevent_level1 then 'move_subevent1_to_unsorted'
+        when :subevent_level2 then 'move_subevent2_to_unsorted'
+        else 'move_to_unsorted'
+        end
+      when 'move_to_daily'
+        case current_state
+        when :unsorted then 'move_to_daily'
+        when :event_root then 'move_event_to_daily'
+        when :subevent_level1 then 'move_subevent1_to_daily'
+        when :subevent_level2 then 'move_subevent2_to_daily'
+        else 'move_to_daily'
+        end
+      when 'move_to_event'
+        case current_state
+        when :unsorted then 'move_to_event'
+        when :daily then 'move_daily_to_event'
+        when :subevent_level1 then 'move_subevent1_to_event'
+        when :subevent_level2 then 'move_subevent2_to_event'
+        else 'move_to_event'
+        end
+      else
+        base_transition
+      end
+    end
   end
 
   # Collection action for importing media in popup
@@ -1057,6 +1035,216 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
     @pending_transition = session[:pending_transition]
     @level = params[:level].to_i
     @existing_events = Event.includes(:subevents).order(:title)
+  end
+  
+  # Event selection page for batch "add to existing event"
+  collection_action :batch_select_event, method: [:get, :post] do
+    @batch_media_ids = session[:batch_media_ids] || []
+    @batch_transition = session[:batch_transition]
+    
+    unless @batch_transition
+      redirect_to collection_path, alert: "No batch transition specified"
+      return
+    end
+    
+    if request.post?
+      # User selected an event, store it and proceed to validation
+      event_id = params[:event_id]
+      
+      if event_id.blank?
+        @existing_events = Event.order(:title)
+        @error_message = "Please select an event"
+        render 'batch_select_event'
+        return
+      end
+      
+      # Store the selected event
+      session[:batch_target_event_id] = event_id
+      
+      # Now redirect to validation with event context
+      redirect_to batch_validate_transition_family_media_path
+    else
+      # Show event selection form
+      @media = Medium.where(id: @batch_media_ids)
+      @existing_events = Event.order(:title)
+      render 'batch_select_event'
+    end
+  end
+  
+  # Batch validation page - shows which media can be moved
+  collection_action :batch_validate_transition, method: :get do
+    @batch_media_ids = session[:batch_media_ids] || []
+    @batch_transition = session[:batch_transition]
+    @target_event_id = session[:batch_target_event_id]
+    
+    unless @batch_transition
+      redirect_to collection_path, alert: "No batch transition specified"
+      return
+    end
+    
+    # Load target event if specified
+    @target_event = Event.find_by(id: @target_event_id) if @target_event_id
+    
+    @media = Medium.where(id: @batch_media_ids)
+    @validation_results = []
+    
+    @media.each do |medium|
+      # Determine the actual transition name based on current state
+      transition_name = determine_transition_for_medium(medium, @batch_transition)
+      result = medium.analyze_transition(transition_name)
+      
+      # Additional validation for event-related transitions
+      blocked_reason = nil
+      if @target_event && result[:allowed_transition]
+        # Check if medium is already in this event
+        if medium.event_id == @target_event.id
+          result[:allowed_transition] = false
+          blocked_reason = "Already in this event"
+        end
+      end
+      
+      @validation_results << {
+        medium: medium,
+        transition_name: transition_name,
+        can_transition: result[:allowed_transition],
+        reason: blocked_reason || result[:guard_failure_reason] || result[:error]
+      }
+    end
+    
+    @movable_count = @validation_results.count { |r| r[:can_transition] }
+    @blocked_count = @validation_results.count { |r| !r[:can_transition] }
+    
+    render 'batch_validate_transition'
+  end
+  
+  # Execute batch transition (for direct transitions like move_to_daily, move_to_unsorted)
+  collection_action :batch_execute_transition, method: :post do
+    batch_media_ids = session[:batch_media_ids] || []
+    batch_transition = session[:batch_transition]
+    move_blocked = params[:move_blocked] == 'true'
+    
+    unless batch_transition
+      redirect_to collection_path, alert: "No batch transition specified"
+      return
+    end
+    
+    media = Medium.where(id: batch_media_ids)
+    success_count = 0
+    error_count = 0
+    errors = []
+    
+    media.each do |medium|
+      # Determine the actual transition name based on current state
+      transition_name = determine_transition_for_medium(medium, batch_transition)
+      result = medium.analyze_transition(transition_name)
+      
+      if !result[:allowed_transition] && !move_blocked
+        # Skip blocked media if user chose not to move them
+        next
+      end
+      
+      begin
+        if result[:allowed_transition]
+          medium.send("#{transition_name}!")
+          success_count += 1
+        else
+          errors << "#{medium.current_filename}: #{result[:guard_failure_reason] || 'Cannot transition'}"
+          error_count += 1
+        end
+      rescue => e
+        errors << "#{medium.current_filename}: #{e.message}"
+        error_count += 1
+      end
+    end
+    
+    # Clear session
+    session.delete(:batch_media_ids)
+    session.delete(:batch_transition)
+    
+    if error_count == 0
+      redirect_to collection_path, notice: "Successfully moved #{success_count} media files"
+    elsif success_count > 0
+      redirect_to collection_path, alert: "Moved #{success_count} files, but #{error_count} failed: #{errors.first(3).join('; ')}"
+    else
+      redirect_to collection_path, alert: "Failed to move files: #{errors.first(3).join('; ')}"
+    end
+  end
+  
+  # Batch select event/subevent for transition
+  collection_action :batch_select_destination, method: :get do
+    @batch_media_ids = session[:batch_media_ids] || []
+    @batch_transition = session[:batch_transition]
+    
+    # Determine target state from first movable medium
+    media = Medium.where(id: @batch_media_ids)
+    first_movable = media.find { |m| m.analyze_transition(@batch_transition)[:allowed_transition] }
+    
+    if first_movable
+      analysis = first_movable.analyze_transition(@batch_transition)
+      @target_state = analysis[:target_state]
+      @level = case @target_state
+               when :subevent_level1 then 1
+               when :subevent_level2 then 2
+               else nil
+               end
+      
+      @existing_events = Event.order(:title)
+      render 'batch_select_destination'
+    else
+      redirect_to collection_path, alert: "No media can be moved with this transition"
+    end
+  end
+  
+  # Complete batch transition with event/subevent selection
+  collection_action :batch_complete_transition, method: :post do
+    batch_media_ids = session[:batch_media_ids] || []
+    batch_transition = session[:batch_transition]
+    # Get event_id from session (set by event creation or selection) or params
+    event_id = session[:batch_target_event_id] || params[:event_id]
+    subevent_id = params[:subevent2_id] || params[:subevent_id]
+    
+    media = Medium.where(id: batch_media_ids)
+    success_count = 0
+    error_count = 0
+    errors = []
+    
+    media.each do |medium|
+      # Determine the actual transition name based on current state
+      transition_name = determine_transition_for_medium(medium, batch_transition)
+      result = medium.analyze_transition(transition_name)
+      
+      # Skip if already in target event
+      if event_id.present? && medium.event_id.to_s == event_id.to_s
+        next
+      end
+      
+      next unless result[:allowed_transition]
+      
+      begin
+        # Set instance variables for AASM
+        medium.instance_variable_set(:@pending_event_id, event_id) if event_id.present?
+        medium.instance_variable_set(:@pending_subevent_id, subevent_id) if subevent_id.present?
+        
+        medium.send("#{transition_name}!")
+        success_count += 1
+      rescue => e
+        errors << "#{medium.current_filename}: #{e.message}"
+        error_count += 1
+      end
+    end
+    
+    # Clear session
+    session.delete(:batch_media_ids)
+    session.delete(:batch_transition)
+    session.delete(:batch_target_event_id)
+    
+    if error_count == 0 && event_id.present?
+      redirect_to family_event_path(event_id), notice: "Successfully moved #{success_count} media files"
+    elsif error_count == 0
+      redirect_to collection_path, notice: "Successfully moved #{success_count} media files"
+    else
+      redirect_to collection_path, alert: "Moved #{success_count} files, but #{error_count} failed"
+    end
   end
 
 end

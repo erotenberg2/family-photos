@@ -178,7 +178,34 @@ ActiveAdmin.register Event, namespace: :family, as: 'Events' do
       # Set created_by to current user
       params[:event][:created_by_id] = current_user.id if defined?(current_user) && current_user
       
-      super
+      # Check if this is from a batch operation
+      batch_media_ids = session[:batch_media_ids] || params[:batch_media_ids]&.split(',')
+      
+      create! do |success, failure|
+        success.html do
+          # If batch media IDs present, store the event and redirect to validation
+          if batch_media_ids.present?
+            # Store the newly created event ID
+            session[:batch_target_event_id] = resource.id
+            
+            # Redirect to validation page
+            redirect_to batch_validate_transition_family_media_path, notice: "Event created. Review which media can be moved."
+          else
+            redirect_to family_event_path(resource), notice: "Event was successfully created."
+          end
+        end
+        
+        failure.html do
+          # If event creation failed and this was a batch operation, clear session and redirect
+          if batch_media_ids.present?
+            session.delete(:batch_media_ids)
+            session.delete(:batch_transition)
+            redirect_to family_media_path, alert: "Failed to create event. Batch operation cancelled."
+          else
+            render :new
+          end
+        end
+      end
     end
   end
 

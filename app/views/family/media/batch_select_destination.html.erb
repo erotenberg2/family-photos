@@ -1,0 +1,203 @@
+<%= render partial: 'shared/form_styles' %>
+
+<div class="batch-destination-container">
+  <h2>Select Destination for Batch Move</h2>
+  
+  <div class="transition-info">
+    <p><strong>Transition:</strong> <%= @batch_transition.to_s.humanize %></p>
+    <p><strong>Files to Move:</strong> <%= @batch_media_ids.count %></p>
+    <p><strong>Target:</strong> 
+      <% if @target_state == :event_root %>
+        Event Root
+      <% elsif @target_state == :subevent_level1 %>
+        Subevent Level 1
+      <% elsif @target_state == :subevent_level2 %>
+        Subevent Level 2
+      <% end %>
+    </p>
+  </div>
+  
+  <%= form_tag batch_complete_transition_family_media_path, method: :post, class: 'destination-form' do %>
+    
+    <% if @target_state == :event_root %>
+      <%# Simple event selection %>
+      <div class="form-group">
+        <%= label_tag :event_id, "Select Event:", class: "form-label" %>
+        <%= select_tag :event_id, 
+                       options_from_collection_for_select(@existing_events, :id, :title),
+                       { prompt: "Choose an event...", class: "form-control", required: true } %>
+        <small class="form-text">Select the event to move these media files to.</small>
+      </div>
+      
+    <% elsif @level == 1 %>
+      <%# Event + Level 1 Subevent selection %>
+      <div class="form-group">
+        <%= label_tag :event_id, "Select Event:", class: "form-label" %>
+        <%= select_tag :event_id,
+                       options_from_collection_for_select(@existing_events, :id, :title),
+                       { prompt: "Choose an event...", class: "form-control event-selector", required: true } %>
+      </div>
+      
+      <div class="form-group cascade-group" id="subevent-group">
+        <%= label_tag :subevent_id, "Select Subevent:", class: "form-label" %>
+        <%= select_tag :subevent_id,
+                       [],
+                       { prompt: "Choose a subevent...", class: "form-control subevent-selector", required: true } %>
+        <small class="form-text">Select the subevent to move these media files to.</small>
+      </div>
+      
+    <% elsif @level == 2 %>
+      <%# Event + Level 1 + Level 2 Subevent selection %>
+      <div class="form-group">
+        <%= label_tag :event_id, "Select Event:", class: "form-label" %>
+        <%= select_tag :event_id,
+                       options_from_collection_for_select(@existing_events, :id, :title),
+                       { prompt: "Choose an event...", class: "form-control event-selector", required: true } %>
+      </div>
+      
+      <div class="form-group cascade-group" id="subevent1-group">
+        <%= label_tag :subevent_id, "Select Level 1 Subevent:", class: "form-label" %>
+        <%= select_tag :subevent_id,
+                       [],
+                       { prompt: "Choose a level 1 subevent...", class: "form-control subevent1-selector", required: true } %>
+      </div>
+      
+      <div class="form-group cascade-group" id="subevent2-group">
+        <%= label_tag :subevent2_id, "Select Level 2 Subevent:", class: "form-label" %>
+        <%= select_tag :subevent2_id,
+                       [],
+                       { prompt: "Choose a level 2 subevent...", class: "form-control subevent2-selector", required: true } %>
+        <small class="form-text">Select the level 2 subevent to move these media files to.</small>
+      </div>
+    <% end %>
+    
+    <div class="action-buttons">
+      <%= submit_tag "Move Files", class: 'btn btn-primary' %>
+      <%= link_to "Cancel", collection_path, class: 'btn btn-secondary' %>
+    </div>
+  <% end %>
+</div>
+
+<% if @level && @level > 0 %>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    const eventSelector = document.querySelector('.event-selector');
+    const subevent1Group = document.getElementById('subevent1-group');
+    const subevent1Selector = document.querySelector('.subevent1-selector');
+    const subevent2Group = document.getElementById('subevent2-group');
+    const subevent2Selector = document.querySelector('.subevent2-selector');
+    
+    // Event data with level 1 subevents
+    const eventDataLevel1 = <%= @existing_events.map { |e| [e.id, e.subevents.select { |s| s.depth == 1 }.map { |s| [s.id, s.footer_name] }] }.to_h.to_json.html_safe %>;
+    
+    <% if @level == 2 %>
+    // Level 1 subevent data with their level 2 children
+    const subevent1Data = <%= Subevent.top_level.select { |s| s.depth == 1 }.map { |s| [s.id, s.child_subevents.map { |c| [c.id, c.footer_name] }] }.to_h.to_json.html_safe %>;
+    <% end %>
+    
+    eventSelector.addEventListener('change', function() {
+      const eventId = parseInt(this.value);
+      
+      // Clear subevent options
+      if (subevent1Selector) {
+        subevent1Selector.innerHTML = '<option value="">Choose a subevent...</option>';
+      }
+      if (subevent2Selector) {
+        subevent2Selector.innerHTML = '<option value="">Choose a level 2 subevent...</option>';
+      }
+      
+      if (eventId && eventDataLevel1[eventId]) {
+        // Show the subevent group
+        if (subevent1Group) {
+          subevent1Group.classList.add('visible');
+          
+          // Populate subevent options
+          eventDataLevel1[eventId].forEach(function(subevent) {
+            const option = document.createElement('option');
+            option.value = subevent[0];
+            option.text = subevent[1];
+            subevent1Selector.appendChild(option);
+          });
+        }
+      } else {
+        // Hide subevent groups
+        if (subevent1Group) {
+          subevent1Group.classList.remove('visible');
+        }
+        if (subevent2Group) {
+          subevent2Group.classList.remove('visible');
+        }
+      }
+    });
+    
+    <% if @level == 2 %>
+    // Level 1 subevent selector change handler
+    if (subevent1Selector) {
+      subevent1Selector.addEventListener('change', function() {
+        const subevent1Id = parseInt(this.value);
+        
+        if (subevent2Selector) {
+          subevent2Selector.innerHTML = '<option value="">Choose a level 2 subevent...</option>';
+        }
+        
+        if (subevent1Id && subevent1Data[subevent1Id] && subevent1Data[subevent1Id].length > 0) {
+          // Show the level 2 subevent group
+          if (subevent2Group) {
+            subevent2Group.classList.add('visible');
+            
+            // Populate level 2 subevent options
+            subevent1Data[subevent1Id].forEach(function(subevent) {
+              const option = document.createElement('option');
+              option.value = subevent[0];
+              option.text = subevent[1];
+              subevent2Selector.appendChild(option);
+            });
+          }
+        } else {
+          // Hide the level 2 subevent group
+          if (subevent2Group) {
+            subevent2Group.classList.remove('visible');
+          }
+        }
+      });
+    }
+    <% end %>
+  });
+</script>
+<% end %>
+
+<style>
+.batch-destination-container {
+  max-width: 800px;
+  margin: 20px auto;
+  padding: 20px;
+}
+
+.transition-info {
+  background: #f8f9fa;
+  padding: 15px;
+  border-radius: 4px;
+  margin-bottom: 20px;
+}
+
+.transition-info p {
+  margin: 5px 0;
+}
+
+.destination-form {
+  background: white;
+  padding: 20px;
+  border-radius: 4px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.cascade-group {
+  display: none;
+  margin-top: 20px;
+}
+
+.cascade-group.visible {
+  display: block;
+}
+</style>
+

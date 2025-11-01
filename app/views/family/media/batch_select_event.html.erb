@@ -1,0 +1,189 @@
+<%= render partial: 'shared/form_styles' %>
+
+<div class="batch-select-event-container">
+  <h2>Select Event for Batch Move</h2>
+  
+  <div class="info-section">
+    <p><strong>Selected Files:</strong> <%= @media.count %></p>
+    <p>Choose an existing event to move these files to, or cancel to return to the media list.</p>
+  </div>
+  
+  <% if @error_message %>
+    <div class="alert alert-danger">
+      <%= @error_message %>
+    </div>
+  <% end %>
+  
+  <%= form_tag batch_select_event_family_media_path, method: :post, class: 'event-selection-form' do %>
+    <div class="form-group">
+      <label for="event_id">Select Event:</label>
+      <%= select_tag :event_id, 
+          options_from_collection_for_select(@existing_events, :id, :title),
+          prompt: "-- Choose an event --",
+          class: 'form-control event-selector' %>
+    </div>
+    
+    <% if @existing_events.any? %>
+      <div class="event-details" id="event-details" style="display: none;">
+        <h4>Event Details</h4>
+        <div id="event-description"></div>
+        <div id="event-dates"></div>
+      </div>
+    <% end %>
+    
+    <div class="action-buttons">
+      <%= submit_tag "Continue to Validation", class: 'btn btn-primary' %>
+      <%= link_to "Cancel", collection_path, class: 'btn btn-secondary' %>
+    </div>
+  <% end %>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const eventSelector = document.querySelector('.event-selector');
+  const eventDetails = document.getElementById('event-details');
+  const eventDescription = document.getElementById('event-description');
+  const eventDates = document.getElementById('event-dates');
+  
+  // Event data from server
+  const eventData = <%= raw @existing_events.map { |e| 
+    { 
+      id: e.id, 
+      title: e.title, 
+      description: e.description, 
+      start_date: e.start_date.strftime('%Y-%m-%d'),
+      end_date: e.end_date.strftime('%Y-%m-%d')
+    } 
+  }.to_json %>;
+  
+  eventSelector.addEventListener('change', function() {
+    const selectedId = parseInt(this.value);
+    
+    if (selectedId) {
+      const event = eventData.find(e => e.id === selectedId);
+      if (event) {
+        eventDescription.innerHTML = '<p><strong>Description:</strong> ' + (event.description || 'No description') + '</p>';
+        eventDates.innerHTML = '<p><strong>Date Range:</strong> ' + event.start_date + ' to ' + event.end_date + '</p>';
+        eventDetails.style.display = 'block';
+      }
+    } else {
+      eventDetails.style.display = 'none';
+    }
+  });
+});
+</script>
+
+<style>
+.batch-select-event-container {
+  max-width: 800px;
+  margin: 20px auto;
+  padding: 20px;
+}
+
+.info-section {
+  background: #f8f9fa;
+  padding: 15px;
+  border-radius: 4px;
+  margin-bottom: 20px;
+}
+
+.info-section p {
+  margin: 5px 0;
+}
+
+.alert {
+  padding: 15px;
+  border-radius: 4px;
+  margin-bottom: 15px;
+}
+
+.alert-danger {
+  background-color: #f8d7da;
+  border: 1px solid #f5c6cb;
+  color: #721c24;
+}
+
+.event-selection-form {
+  background: white;
+  padding: 20px;
+  border-radius: 4px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.form-group {
+  margin-bottom: 20px;
+}
+
+.form-group label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: #333;
+}
+
+.form-control {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.form-control:focus {
+  outline: none;
+  border-color: #007bff;
+  box-shadow: 0 0 0 0.2rem rgba(0,123,255,.25);
+}
+
+.event-details {
+  background: #e7f3ff;
+  border: 1px solid #b3d9ff;
+  padding: 15px;
+  border-radius: 4px;
+  margin-bottom: 20px;
+}
+
+.event-details h4 {
+  margin-top: 0;
+  color: #007bff;
+}
+
+.event-details p {
+  margin: 8px 0;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.btn {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  text-decoration: none;
+  display: inline-block;
+}
+
+.btn-primary {
+  background-color: #007bff;
+  color: white;
+}
+
+.btn-primary:hover {
+  background-color: #0056b3;
+}
+
+.btn-secondary {
+  background-color: #6c757d;
+  color: white;
+}
+
+.btn-secondary:hover {
+  background-color: #545b62;
+}
+</style>
+
