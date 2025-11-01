@@ -14,4 +14,21 @@ module Constants
   
   # Event hierarchy depth limit
   EVENT_RECURSION_DEPTH = 3
+  
+  # Media type icons
+  CAMERA_ICON = "📷"
+  AUDIO_ICON = "🎵"
+  VIDEO_ICON = "🎬"
+  FILE_ICON = "📄"
+  
+  # Icon mapping by medium type
+  MEDIUM_TYPE_ICONS = {
+    'photo' => CAMERA_ICON,
+    'audio' => AUDIO_ICON,
+    'video' => VIDEO_ICON
+  }.freeze
+  
+  def self.icon_for_medium_type(medium_type)
+    MEDIUM_TYPE_ICONS[medium_type] || FILE_ICON
+  end
 end

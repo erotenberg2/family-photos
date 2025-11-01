@@ -30,14 +30,14 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
                       onmouseout: "this.style.transform='scale(1)'")
           else
             # Show placeholder for unprocessed photos (don't load full image)
-            content_tag :div, "📷", style: "width: 60px; height: 60px; background: #f8f9fa; display: flex; align-items: center; justify-content: center; font-size: 24px; border-radius: 4px; cursor: pointer; border: 2px dashed #dee2e6;"
+            content_tag :div, Constants::CAMERA_ICON, style: "width: 60px; height: 60px; background: #f8f9fa; display: flex; align-items: center; justify-content: center; font-size: 24px; border-radius: 4px; cursor: pointer; border: 2px dashed #dee2e6;"
           end
         when 'audio'
-          content_tag :div, "🎵", style: "width: 60px; height: 60px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; font-size: 24px; border-radius: 4px; cursor: pointer;"
+          content_tag :div, Constants::AUDIO_ICON, style: "width: 60px; height: 60px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; font-size: 24px; border-radius: 4px; cursor: pointer;"
         when 'video'
-          content_tag :div, "🎬", style: "width: 60px; height: 60px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; font-size: 24px; border-radius: 4px; cursor: pointer;"
+          content_tag :div, Constants::VIDEO_ICON, style: "width: 60px; height: 60px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; font-size: 24px; border-radius: 4px; cursor: pointer;"
         else
-          content_tag :div, "📄", style: "width: 60px; height: 60px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; font-size: 24px; border-radius: 4px; cursor: pointer;"
+          content_tag :div, Constants::FILE_ICON, style: "width: 60px; height: 60px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; font-size: 24px; border-radius: 4px; cursor: pointer;"
         end
       end
     end
@@ -45,13 +45,13 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
     column "Type", sortable: false do |medium|
       case medium.medium_type
       when 'photo'
-        content_tag :div, "📸", style: "font-size: 20px; text-align: center;", title: "Photo"
+        content_tag :div, Constants::CAMERA_ICON, style: "font-size: 20px; text-align: center;", title: "Photo"
       when 'video'
-        content_tag :div, "🎬", style: "font-size: 20px; text-align: center;", title: "Video"
+        content_tag :div, Constants::VIDEO_ICON, style: "font-size: 20px; text-align: center;", title: "Video"
       when 'audio'
-        content_tag :div, "🎵", style: "font-size: 20px; text-align: center;", title: "Audio"
+        content_tag :div, Constants::AUDIO_ICON, style: "font-size: 20px; text-align: center;", title: "Audio"
       else
-        content_tag :div, "📄", style: "font-size: 20px; text-align: center;", title: "Unknown"
+        content_tag :div, Constants::FILE_ICON, style: "font-size: 20px; text-align: center;", title: "Unknown"
       end
     end
     
