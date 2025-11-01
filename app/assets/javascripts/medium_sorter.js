@@ -13,6 +13,9 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
     events: []
   };
 
+  // Store tree data by key for quick lookup
+  let treeDataByKey = {};
+
   // Wait for the container element to appear (ActiveAdmin may render it after DOMContentLoaded)
   function waitForContainer(callback, maxAttempts = 50) {
     const container = document.getElementById('medium-sorter-container');
@@ -80,6 +83,8 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
         console.log('[MediumSorter] Events items:', data.events?.length || 0);
         
         mediaData = data;
+        // Build lookup map for quick access
+        buildTreeDataMap(data);
         console.log('[MediumSorter] Calling renderInterface()...');
         renderInterface();
       })
@@ -130,6 +135,9 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
               <button class="filter-btn filter-clear" data-column="unsorted">Clear</button>
             </div>
           </div>
+          <div class="medium-sorter-info" id="unsorted-info">
+            <div class="info-placeholder">Click on an item to see details</div>
+          </div>
           <div class="medium-sorter-listbox" id="unsorted-listbox" data-column="unsorted">
             ${renderHierarchicalTree(mediaData.unsorted, 'unsorted')}
           </div>
@@ -147,6 +155,9 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
               <button class="filter-btn filter-clear" data-column="daily">Clear</button>
             </div>
           </div>
+          <div class="medium-sorter-info" id="daily-info">
+            <div class="info-placeholder">Click on an item to see details</div>
+          </div>
           <div class="medium-sorter-listbox" id="daily-listbox" data-column="daily">
             ${renderHierarchicalTree(mediaData.daily, 'daily')}
           </div>
@@ -156,6 +167,9 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
         <div class="medium-sorter-column">
           <div class="medium-sorter-header">
             <h3>Events</h3>
+          </div>
+          <div class="medium-sorter-info" id="events-info">
+            <div class="info-placeholder">Click on an item to see details</div>
           </div>
           <div class="medium-sorter-listbox" id="events-listbox" data-column="events">
             ${renderHierarchicalTree(mediaData.events, 'events')}
@@ -290,19 +304,303 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
       });
     });
 
-    // Multi-select functionality (basic - will be enhanced for drag and drop)
+    // Single-select functionality - one item per listbox
     const treeItems = document.querySelectorAll('.tree-item');
     console.log('[MediumSorter] Found', treeItems.length, 'tree items');
     treeItems.forEach(item => {
       item.addEventListener('click', function(e) {
+        // Don't interfere with tree toggle
         if (e.target.closest('.tree-toggle')) return;
         
-        this.classList.toggle('selected');
+        // Get the column this item belongs to
+        const listbox = this.closest('.medium-sorter-listbox');
+        const column = listbox ? listbox.getAttribute('data-column') : null;
+        
+        // Deselect all items in this column
+        if (listbox) {
+          listbox.querySelectorAll('.tree-item.selected').forEach(selected => {
+            selected.classList.remove('selected');
+          });
+        }
+        
+        // Select this item
+        this.classList.add('selected');
+        
+        // Update info panel
+        if (column) {
+          updateInfoPanel(column, this);
+        }
+        
         e.stopPropagation();
       });
     });
     
     console.log('[MediumSorter] Event listeners attached successfully');
+  }
+
+  // Build a map of tree data by key for quick lookup
+  function buildTreeDataMap(data) {
+    treeDataByKey = {};
+    
+    ['unsorted', 'daily', 'events'].forEach(column => {
+      if (data[column]) {
+        data[column].forEach(item => {
+          indexTreeItem(item, column);
+        });
+      }
+    });
+  }
+
+  // Recursively index tree items
+  function indexTreeItem(item, column) {
+    const key = `${item.key}_${column}`;
+    treeDataByKey[key] = item;
+    
+    if (item.children) {
+      item.children.forEach(child => {
+        indexTreeItem(child, column);
+      });
+    }
+  }
+
+  // Update info panel based on selected item
+  function updateInfoPanel(column, itemElement) {
+    const infoPanel = document.getElementById(`${column}-info`);
+    if (!infoPanel) return;
+    
+    const itemKey = itemElement.getAttribute('data-key');
+    const itemType = itemElement.getAttribute('data-type');
+    const lookupKey = `${itemKey}_${column}`;
+    const item = treeDataByKey[lookupKey];
+    
+    if (!item) {
+      infoPanel.innerHTML = '<div class="info-placeholder">Item not found</div>';
+      return;
+    }
+    
+    let html = '';
+    
+    if (itemType === 'medium') {
+      html = renderMediumInfo(item.data);
+    } else if (itemType === 'year') {
+      html = renderYearContainerInfo(item, column);
+    } else if (itemType === 'month') {
+      html = renderMonthContainerInfo(item, column);
+    } else if (itemType === 'day') {
+      html = renderDayContainerInfo(item, column);
+    } else if (itemType === 'event') {
+      html = renderEventContainerInfo(item, column);
+    } else if (itemType === 'subevent_l1') {
+      html = renderSL1ContainerInfo(item, column);
+    } else if (itemType === 'subevent_l2') {
+      html = renderSL2ContainerInfo(item, column);
+    } else {
+      html = '<div class="info-placeholder">Unknown item type</div>';
+    }
+    
+    infoPanel.innerHTML = html;
+  }
+
+  // Render info for medium instance
+  function renderMediumInfo(data) {
+    if (!data) return '<div class="info-placeholder">No data available</div>';
+    
+    if (data.medium_type === 'photo') {
+      let imageHtml = '';
+      // Prefer thumbnail for info panel (smaller), fallback to preview/full image
+      if (data.thumbnail_url) {
+        imageHtml = `<img src="${data.thumbnail_url}" alt="Thumbnail" class="info-preview-image" data-width="${data.width || ''}" data-height="${data.height || ''}" onerror="this.onerror=null; this.style.display='none'; this.parentElement.innerHTML='<div class=\\'info-placeholder-icon\\'>${data.icon || '📷'}</div>';">`;
+      } else if (data.preview_url) {
+        imageHtml = `<img src="${data.preview_url}" alt="Preview" class="info-preview-image" data-width="${data.width || ''}" data-height="${data.height || ''}" onerror="this.onerror=null; this.style.display='none'; this.parentElement.innerHTML='<div class=\\'info-placeholder-icon\\'>${data.icon || '📷'}</div>';">`;
+      } else if (data.medium_id) {
+        // Fallback to full image if no thumbnail/preview
+        imageHtml = `<img src="/images/${data.medium_id}" alt="Image" class="info-preview-image" data-width="${data.width || ''}" data-height="${data.height || ''}" onerror="this.onerror=null; this.style.display='none'; this.parentElement.innerHTML='<div class=\\'info-placeholder-icon\\'>${data.icon || '📷'}</div>';">`;
+      } else {
+        imageHtml = `<div class="info-placeholder-icon">${data.icon || '📷'}</div>`;
+      }
+      
+      return `
+        <div class="info-content">
+          <div class="info-preview">${imageHtml}</div>
+          <div class="info-details">
+            <div class="info-title">${escapeHtml(data.filename || data.original_filename)}</div>
+            <div class="info-meta">
+              <div><strong>Type:</strong> Photo</div>
+              ${data.width && data.height ? `<div><strong>Dimensions:</strong> ${data.width} × ${data.height}</div>` : ''}
+              ${data.camera_make || data.camera_model ? `<div><strong>Camera:</strong> ${data.camera_make || ''} ${data.camera_model || ''}</div>` : ''}
+              ${data.file_size_human ? `<div><strong>Size:</strong> ${data.file_size_human}</div>` : ''}
+              ${data.effective_datetime ? `<div><strong>Date:</strong> ${new Date(data.effective_datetime).toLocaleString()}</div>` : ''}
+            </div>
+          </div>
+        </div>
+      `;
+    } else if (data.medium_type === 'audio') {
+      return `
+        <div class="info-content">
+          <div class="info-preview"><div class="info-placeholder-icon">${data.icon || '🎵'}</div></div>
+          <div class="info-details">
+            <div class="info-title">Audio</div>
+            <div class="info-meta">
+              <div><strong>Filename:</strong> ${escapeHtml(data.filename || data.original_filename)}</div>
+              ${data.file_size_human ? `<div><strong>Size:</strong> ${data.file_size_human}</div>` : ''}
+            </div>
+          </div>
+        </div>
+      `;
+    } else if (data.medium_type === 'video') {
+      return `
+        <div class="info-content">
+          <div class="info-preview"><div class="info-placeholder-icon">${data.icon || '🎬'}</div></div>
+          <div class="info-details">
+            <div class="info-title">Video</div>
+            <div class="info-meta">
+              <div><strong>Filename:</strong> ${escapeHtml(data.filename || data.original_filename)}</div>
+              ${data.file_size_human ? `<div><strong>Size:</strong> ${data.file_size_human}</div>` : ''}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+    
+    return '<div class="info-placeholder">Unknown media type</div>';
+  }
+
+  // Calculate stats for a container (count media by type)
+  function calculateContainerStats(item) {
+    const stats = { photo: 0, audio: 0, video: 0, total: 0 };
+    
+    function countItems(node) {
+      if (node.type === 'medium' && node.data) {
+        stats.total++;
+        const type = node.data.medium_type || 'unknown';
+        if (type === 'photo') stats.photo++;
+        else if (type === 'audio') stats.audio++;
+        else if (type === 'video') stats.video++;
+      }
+      
+      if (node.children) {
+        node.children.forEach(child => countItems(child));
+      }
+    }
+    
+    countItems(item);
+    return stats;
+  }
+
+  // Render info for year-container
+  function renderYearContainerInfo(item, column) {
+    const stats = calculateContainerStats(item);
+    return `
+      <div class="info-content">
+        <div class="info-title">Year: ${escapeHtml(item.label)}</div>
+        <div class="info-stats">
+          <div><strong>Total Files:</strong> ${stats.total}</div>
+          <div><strong>Photos:</strong> ${stats.photo}</div>
+          <div><strong>Audio:</strong> ${stats.audio}</div>
+          <div><strong>Video:</strong> ${stats.video}</div>
+          ${item.children ? `<div><strong>Months:</strong> ${item.children.length}</div>` : ''}
+        </div>
+      </div>
+    `;
+  }
+
+  // Render info for month-container
+  function renderMonthContainerInfo(item, column) {
+    const stats = calculateContainerStats(item);
+    const year = item.key.split('/')[0];
+    const month = item.key.split('/')[1];
+    return `
+      <div class="info-content">
+        <div class="info-title">Month: ${year}-${month}</div>
+        <div class="info-stats">
+          <div><strong>Total Files:</strong> ${stats.total}</div>
+          <div><strong>Photos:</strong> ${stats.photo}</div>
+          <div><strong>Audio:</strong> ${stats.audio}</div>
+          <div><strong>Video:</strong> ${stats.video}</div>
+          ${item.children ? `<div><strong>Days:</strong> ${item.children.length}</div>` : ''}
+        </div>
+      </div>
+    `;
+  }
+
+  // Render info for day-container
+  function renderDayContainerInfo(item, column) {
+    const stats = calculateContainerStats(item);
+    const parts = item.key.split('/');
+    return `
+      <div class="info-content">
+        <div class="info-title">Date: ${parts[0]}-${parts[1]}-${parts[2]}</div>
+        <div class="info-stats">
+          <div><strong>Total Files:</strong> ${stats.total}</div>
+          <div><strong>Photos:</strong> ${stats.photo}</div>
+          <div><strong>Audio:</strong> ${stats.audio}</div>
+          <div><strong>Video:</strong> ${stats.video}</div>
+        </div>
+      </div>
+    `;
+  }
+
+  // Render info for event-container
+  function renderEventContainerInfo(item, column) {
+    const stats = calculateContainerStats(item);
+    const eventData = item.data || {};
+    let dateRangeHtml = '';
+    if (eventData.start_date && eventData.end_date) {
+      const startDate = new Date(eventData.start_date);
+      const endDate = new Date(eventData.end_date);
+      const startStr = startDate.toLocaleDateString();
+      const endStr = endDate.toLocaleDateString();
+      dateRangeHtml = `
+        <div><strong>Date Range:</strong> ${startStr} to ${endStr}</div>
+        ${eventData.duration_days ? `<div><strong>Duration:</strong> ${eventData.duration_days} day${eventData.duration_days !== 1 ? 's' : ''}</div>` : ''}
+      `;
+    }
+    
+    return `
+      <div class="info-content">
+        <div class="info-title">Event: ${escapeHtml(item.label)}</div>
+        <div class="info-stats">
+          ${dateRangeHtml}
+          <div><strong>Total Files:</strong> ${stats.total}</div>
+          <div><strong>Photos:</strong> ${stats.photo}</div>
+          <div><strong>Audio:</strong> ${stats.audio}</div>
+          <div><strong>Video:</strong> ${stats.video}</div>
+          ${item.children ? `<div><strong>Subevents:</strong> ${item.children.filter(c => c.type === 'subevent_l1').length}</div>` : ''}
+        </div>
+      </div>
+    `;
+  }
+
+  // Render info for SL1-container
+  function renderSL1ContainerInfo(item, column) {
+    const stats = calculateContainerStats(item);
+    return `
+      <div class="info-content">
+        <div class="info-title">Subevent: ${escapeHtml(item.label)}</div>
+        <div class="info-stats">
+          <div><strong>Total Files:</strong> ${stats.total}</div>
+          <div><strong>Photos:</strong> ${stats.photo}</div>
+          <div><strong>Audio:</strong> ${stats.audio}</div>
+          <div><strong>Video:</strong> ${stats.video}</div>
+        </div>
+      </div>
+    `;
+  }
+
+  // Render info for SL2-container
+  function renderSL2ContainerInfo(item, column) {
+    const stats = calculateContainerStats(item);
+    return `
+      <div class="info-content">
+        <div class="info-title">Subevent: ${escapeHtml(item.label)}</div>
+        <div class="info-stats">
+          <div><strong>Total Files:</strong> ${stats.total}</div>
+          <div><strong>Photos:</strong> ${stats.photo}</div>
+          <div><strong>Audio:</strong> ${stats.audio}</div>
+          <div><strong>Video:</strong> ${stats.video}</div>
+        </div>
+      </div>
+    `;
   }
 
   // Show filter dialog
@@ -356,6 +654,20 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
     // Re-render the listbox
     const listbox = document.getElementById(`${column}-listbox`);
     listbox.innerHTML = renderHierarchicalTree(filteredData, column);
+    
+    // Clear existing keys for this column and rebuild with filtered data
+    Object.keys(treeDataByKey).forEach(key => {
+      if (key.endsWith(`_${column}`)) {
+        delete treeDataByKey[key];
+      }
+    });
+    
+    if (filteredData) {
+      filteredData.forEach(item => {
+        indexTreeItem(item, column);
+      });
+    }
+    
     attachEventListeners();
   }
 
@@ -364,6 +676,10 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
     const originalData = mediaData[column] || [];
     const listbox = document.getElementById(`${column}-listbox`);
     listbox.innerHTML = renderHierarchicalTree(originalData, column);
+    
+    // Rebuild tree data map with original data
+    buildTreeDataMap(mediaData);
+    
     attachEventListeners();
   }
 

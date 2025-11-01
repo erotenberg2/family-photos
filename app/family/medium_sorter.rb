@@ -54,7 +54,7 @@ ActiveAdmin.register_page "MediumSorter", namespace: :family do
         hierarchy[year][month] ||= {}
         hierarchy[year][month][day] ||= []
         
-        hierarchy[year][month][day] << {
+        item_data = {
           id: medium.id,
           filename: medium.current_filename,
           original_filename: medium.original_filename,
@@ -65,6 +65,22 @@ ActiveAdmin.register_page "MediumSorter", namespace: :family do
           file_size: medium.file_size,
           file_size_human: medium.file_size_human
         }
+        
+        # Add photo-specific paths if available
+        if medium.medium_type == 'photo' && medium.mediable
+          photo = medium.mediable
+          item_data[:photo_id] = photo.id
+          item_data[:medium_id] = medium.id
+          # Use Rails routes for image paths
+          item_data[:thumbnail_url] = "/thumbnails/#{medium.id}" if photo.thumbnail_path && File.exist?(photo.thumbnail_path)
+          item_data[:preview_url] = "/images/#{medium.id}" if photo.preview_path && File.exist?(photo.preview_path)
+          item_data[:width] = photo.width
+          item_data[:height] = photo.height
+          item_data[:camera_make] = photo.camera_make
+          item_data[:camera_model] = photo.camera_model
+        end
+        
+        hierarchy[year][month][day] << item_data
       end
       
       # Convert to nested array structure with proper numerical sorting (chronological order: oldest first)
@@ -111,29 +127,49 @@ ActiveAdmin.register_page "MediumSorter", namespace: :family do
         next unless medium.event
         
         event_id = medium.event.id
-        event_title = medium.event.title
+        event = medium.event
+        event_title = event.title
         
         hierarchy[event_id] ||= {
           id: event_id,
           title: event_title,
+          start_date: event.start_date,
+          end_date: event.end_date,
+          duration_days: event.duration_days,
           root_media: [],
           subevents: {}
         }
         
         case medium.storage_state.to_s
         when 'event_root'
-          hierarchy[event_id][:root_media] << {
-          id: medium.id,
-          filename: medium.current_filename,
-          original_filename: medium.original_filename,
-          medium_type: medium.medium_type,
-          icon: Constants.icon_for_medium_type(medium.medium_type),
-          effective_datetime: medium.effective_datetime&.iso8601,
-          created_at: medium.created_at.iso8601,
-          file_size: medium.file_size,
-          file_size_human: medium.file_size_human,
-          storage_state: medium.storage_state
-        }
+          item_data = {
+            id: medium.id,
+            filename: medium.current_filename,
+            original_filename: medium.original_filename,
+            medium_type: medium.medium_type,
+            icon: Constants.icon_for_medium_type(medium.medium_type),
+            effective_datetime: medium.effective_datetime&.iso8601,
+            created_at: medium.created_at.iso8601,
+            file_size: medium.file_size,
+            file_size_human: medium.file_size_human,
+            storage_state: medium.storage_state
+          }
+          
+          # Add photo-specific paths if available
+          if medium.medium_type == 'photo' && medium.mediable
+            photo = medium.mediable
+            item_data[:photo_id] = photo.id
+            item_data[:medium_id] = medium.id
+            # Use Rails routes for image paths
+            item_data[:thumbnail_url] = "/thumbnails/#{medium.id}" if photo.thumbnail_path && File.exist?(photo.thumbnail_path)
+            item_data[:preview_url] = "/images/#{medium.id}" if photo.preview_path && File.exist?(photo.preview_path)
+            item_data[:width] = photo.width
+            item_data[:height] = photo.height
+            item_data[:camera_make] = photo.camera_make
+            item_data[:camera_model] = photo.camera_model
+          end
+          
+          hierarchy[event_id][:root_media] << item_data
         when 'subevent_level1', 'subevent_level2'
           next unless medium.subevent
           
@@ -150,7 +186,7 @@ ActiveAdmin.register_page "MediumSorter", namespace: :family do
             media: []
           }
           
-          hierarchy[event_id][:subevents][subevent_id][:media] << {
+          item_data = {
             id: medium.id,
             filename: medium.current_filename,
             original_filename: medium.original_filename,
@@ -162,6 +198,22 @@ ActiveAdmin.register_page "MediumSorter", namespace: :family do
             file_size_human: medium.file_size_human,
             storage_state: medium.storage_state
           }
+          
+          # Add photo-specific paths if available
+          if medium.medium_type == 'photo' && medium.mediable
+            photo = medium.mediable
+            item_data[:photo_id] = photo.id
+            item_data[:medium_id] = medium.id
+            # Use Rails routes for image paths
+            item_data[:thumbnail_url] = "/thumbnails/#{medium.id}" if photo.thumbnail_path && File.exist?(photo.thumbnail_path)
+            item_data[:preview_url] = "/images/#{medium.id}" if photo.preview_path && File.exist?(photo.preview_path)
+            item_data[:width] = photo.width
+            item_data[:height] = photo.height
+            item_data[:camera_make] = photo.camera_make
+            item_data[:camera_model] = photo.camera_model
+          end
+          
+          hierarchy[event_id][:subevents][subevent_id][:media] << item_data
         end
       end
       
@@ -193,7 +245,14 @@ ActiveAdmin.register_page "MediumSorter", namespace: :family do
           type: 'event',
           label: event_data[:title],
           key: "event_#{event_data[:id]}",
-          children: children
+          children: children,
+          data: {
+            event_id: event_data[:id],
+            title: event_data[:title],
+            start_date: event_data[:start_date]&.iso8601,
+            end_date: event_data[:end_date]&.iso8601,
+            duration_days: event_data[:duration_days]
+          }
         }
       end
     end
