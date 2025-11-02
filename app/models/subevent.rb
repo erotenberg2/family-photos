@@ -8,6 +8,7 @@ class Subevent < ApplicationRecord
   validate :depth_within_limit
   validate :no_self_reference
   validate :no_circular_reference
+  validate :title_contains_no_illegal_characters
   
   # Callbacks for folder management
   after_create :set_initial_folder_path
@@ -24,8 +25,10 @@ class Subevent < ApplicationRecord
   end
   
   def footer_name
-    # Preserve the original case for the title, just clean up special characters
-    title.gsub(/[^a-zA-Z0-9\s-]/, '').strip.gsub(/\s+/, '_')
+    # Remove illegal characters: / (path separator) and null character
+    # Allow: letters, digits, spaces, hyphens, underscores, and most other characters
+    # Replace multiple spaces with single space, then replace spaces with underscores
+    title.gsub(/[\/\x00]/, '').strip.gsub(/\s+/, ' ').gsub(/\s/, '_')
   end
   
   def media_count
@@ -91,6 +94,17 @@ class Subevent < ApplicationRecord
         break
       end
       current = current.parent_subevent
+    end
+  end
+  
+  def title_contains_no_illegal_characters
+    return unless title.present?
+    # Illegal characters for macOS and Linux: / (forward slash) and null character (\x00)
+    # Also problematic: : (colon) on older macOS HFS+, but we'll allow it for modern systems
+    illegal_chars = title.scan(/[\/\x00]/)
+    if illegal_chars.any?
+      chars_display = illegal_chars.uniq.map { |c| c == '/' ? 'forward slash (/)' : 'null character' }.join(', ')
+      errors.add(:title, "contains illegal characters: #{chars_display}. These characters cannot be used in folder names on macOS or Linux.")
     end
   end
   

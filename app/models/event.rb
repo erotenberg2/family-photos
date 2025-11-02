@@ -8,6 +8,7 @@ class Event < ApplicationRecord
   validates :start_date, presence: true
   validates :end_date, presence: true
   validate :end_date_after_start_date
+  validate :title_contains_no_illegal_characters
   
   # Callbacks for folder management
   after_create :set_initial_folder_path
@@ -52,7 +53,10 @@ class Event < ApplicationRecord
   def folder_name
     # Use parameterize for the date part but preserve the original case for the title
     date_part = "#{start_date.strftime('%Y-%m-%d')}_to_#{end_date.strftime('%Y-%m-%d')}"
-    title_part = title.gsub(/[^a-zA-Z0-9\s-]/, '').strip.gsub(/\s+/, '_')
+    # Remove illegal characters: / (path separator) and null character
+    # Allow: letters, digits, spaces, hyphens, underscores, and most other characters
+    # Replace multiple spaces with single space, then replace spaces with underscores
+    title_part = title.gsub(/[\/\x00]/, '').strip.gsub(/\s+/, ' ').gsub(/\s/, '_')
     "#{date_part}_#{title_part}"
   end
   
@@ -121,6 +125,17 @@ class Event < ApplicationRecord
   def end_date_after_start_date
     return unless start_date && end_date
     errors.add(:end_date, 'must be after start date') if end_date < start_date
+  end
+  
+  def title_contains_no_illegal_characters
+    return unless title.present?
+    # Illegal characters for macOS and Linux: / (forward slash) and null character (\x00)
+    # Also problematic: : (colon) on older macOS HFS+, but we'll allow it for modern systems
+    illegal_chars = title.scan(/[\/\x00]/)
+    if illegal_chars.any?
+      chars_display = illegal_chars.uniq.map { |c| c == '/' ? 'forward slash (/)' : 'null character' }.join(', ')
+      errors.add(:title, "contains illegal characters: #{chars_display}. These characters cannot be used in folder names on macOS or Linux.")
+    end
   end
   
   def rename_event_folder
