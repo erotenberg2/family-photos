@@ -695,8 +695,7 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
       case base_transition
       when 'move_to_unsorted'
         case current_state
-        when :daily then 'move_daily_to_unsorted'
-        when :event_root then 'move_event_to_unsorted'
+        when :daily, :event_root then 'move_to_unsorted'
         when :subevent_level1 then 'move_subevent1_to_unsorted'
         when :subevent_level2 then 'move_subevent2_to_unsorted'
         else 'move_to_unsorted'
@@ -711,11 +710,22 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
         end
       when 'move_to_event'
         case current_state
-        when :unsorted then 'move_to_event'
-        when :daily then 'move_daily_to_event'
+        when :unsorted, :daily then 'move_to_event'
         when :subevent_level1 then 'move_subevent1_to_event'
         when :subevent_level2 then 'move_subevent2_to_event'
         else 'move_to_event'
+        end
+      when 'move_to_subevent_level1'
+        case current_state
+        when :unsorted, :daily, :event_root then 'move_to_subevent_level1'
+        when :subevent_level2 then 'move_subevent2_to_subevent_level1'
+        else 'move_to_subevent_level1'
+        end
+      when 'move_to_subevent_level2'
+        case current_state
+        when :unsorted, :daily, :event_root then 'move_to_subevent_level2'
+        when :subevent_level1 then 'move_subevent1_to_subevent_level2'
+        else 'move_to_subevent_level2'
         end
       else
         base_transition

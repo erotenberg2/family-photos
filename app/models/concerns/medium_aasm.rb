@@ -21,91 +21,47 @@ module MediumAasm
         transitions from: :unsorted, to: :daily, guard: :can_move_to_daily?
       end
 
+      # From unsorted or daily state to event_root
       event :move_to_event do
         before do
           validate_to_events_transitions
           perform_file_move(:event_root)
         end
-        transitions from: :unsorted, to: :event_root, guard: :can_move_to_event?
+        transitions from: [:unsorted, :daily], to: :event_root, guard: :can_move_to_event?
       end
 
+      # From unsorted, daily, or event_root state to subevent_level1
       event :move_to_subevent_level1 do
         before do
           validate_to_events_transitions
           perform_file_move(:subevent_level1)
         end
-        transitions from: :unsorted, to: :subevent_level1, guard: :can_move_to_subevent_level1?
+        transitions from: [:unsorted, :daily, :event_root], to: :subevent_level1, guard: :can_move_to_subevent_level1?
       end
 
+      # From unsorted, daily, or event_root state to subevent_level2
       event :move_to_subevent_level2 do
         before do
           validate_to_events_transitions
           perform_file_move(:subevent_level2)
         end
-        transitions from: :unsorted, to: :subevent_level2, guard: :can_move_to_subevent_level2?
+        transitions from: [:unsorted, :daily, :event_root], to: :subevent_level2, guard: :can_move_to_subevent_level2?
       end
 
-      # From daily state
-      event :move_daily_to_unsorted do
+      # From daily or event_root state to unsorted
+      event :move_to_unsorted do
         before do
           perform_file_move(:unsorted)
         end
-        transitions from: :daily, to: :unsorted, guard: :can_move_to_unsorted?
-      end
-
-      event :move_daily_to_event do
-        before do
-          validate_to_events_transitions
-          perform_file_move(:event_root)
-        end
-        transitions from: :daily, to: :event_root, guard: :can_move_to_event?
-      end
-
-      event :move_daily_to_subevent_level1 do
-        before do
-          validate_to_events_transitions
-          perform_file_move(:subevent_level1)
-        end
-        transitions from: :daily, to: :subevent_level1, guard: :can_move_to_subevent_level1?
-      end
-
-      event :move_daily_to_subevent_level2 do
-        before do
-          validate_to_events_transitions
-          perform_file_move(:subevent_level2)
-        end
-        transitions from: :daily, to: :subevent_level2, guard: :can_move_to_subevent_level2?
+        transitions from: [:daily, :event_root], to: :unsorted, guard: :can_move_to_unsorted?
       end
 
       # From event_root state
-      event :move_event_to_unsorted do
-        before do
-          perform_file_move(:unsorted)
-        end
-        transitions from: :event_root, to: :unsorted, guard: :can_move_to_unsorted?
-      end
-
       event :move_event_to_daily do
         before do
           perform_file_move(:daily)
         end
         transitions from: :event_root, to: :daily, guard: :can_move_to_daily?
-      end
-
-      event :move_event_to_subevent_level1 do
-        before do
-          validate_to_events_transitions
-          perform_file_move(:subevent_level1)
-        end
-        transitions from: :event_root, to: :subevent_level1, guard: :can_move_to_subevent_level1?
-      end
-
-      event :move_event_to_subevent_level2 do
-        before do
-          validate_to_events_transitions
-          perform_file_move(:subevent_level2)
-        end
-        transitions from: :event_root, to: :subevent_level2, guard: :can_move_to_subevent_level2?
       end
 
       # From subevent_level1 state
