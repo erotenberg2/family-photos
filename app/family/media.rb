@@ -690,38 +690,9 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
     
     # Helper to determine the correct transition name based on current state
     def determine_transition_for_medium(medium, base_transition)
-      current_state = medium.storage_state.to_sym
-      
-      case base_transition
-      when 'move_to_unsorted'
-        case current_state
-        when :daily, :event_root then 'move_to_unsorted'
-        when :subevent_level1 then 'move_subevent1_to_unsorted'
-        when :subevent_level2 then 'move_subevent2_to_unsorted'
-        else 'move_to_unsorted'
-        end
-      when 'move_to_daily'
-        case current_state
-        when :unsorted then 'move_to_daily'
-        when :event_root then 'move_event_to_daily'
-        when :subevent_level1 then 'move_subevent1_to_daily'
-        when :subevent_level2 then 'move_subevent2_to_daily'
-        else 'move_to_daily'
-        end
-      when 'move_to_event'
-        case current_state
-        when :unsorted, :daily then 'move_to_event'
-        when :subevent_level1 then 'move_subevent1_to_event'
-        when :subevent_level2 then 'move_subevent2_to_event'
-        else 'move_to_event'
-        end
-      when 'move_to_subevent_level1'
-        'move_to_subevent_level1'
-      when 'move_to_subevent_level2'
-        'move_to_subevent_level2'
-      else
-        base_transition
-      end
+      # All transitions are now consolidated - just return the base transition name
+      # The consolidated events handle all source states via their 'from' arrays
+      base_transition
     end
   end
 

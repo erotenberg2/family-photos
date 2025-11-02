@@ -13,15 +13,19 @@ module MediumAasm
       state :subevent_level1 # First level subevent (e.g., "Zimbabwe")
       state :subevent_level2 # Second level subevent (e.g., "morning safari")
 
-      # From unsorted state
+      # From unsorted, event_root, subevent_level1, or subevent_level2 state to daily
       event :move_to_daily do
         before do
-          perform_file_move(:daily)
+          capture_source_path_before_move
+          unless perform_file_move(:daily)
+            raise "Failed to move file to daily - file move operation failed"
+          end
         end
-        transitions from: :unsorted, to: :daily, guard: :can_move_to_daily?
+        transitions from: [:unsorted, :event_root, :subevent_level1, :subevent_level2], to: :daily, guard: :can_move_to_daily?
       end
 
-      # From unsorted or daily state to event_root
+      # From unsorted, daily, event_root, subevent_level1, or subevent_level2 state to event_root
+      # Allows moving from one event to another event (e.g., africa to china)
       event :move_to_event do
         before do
           capture_source_path_before_move
@@ -30,7 +34,7 @@ module MediumAasm
             raise "Failed to move file to event_root - file move operation failed"
           end
         end
-        transitions from: [:unsorted, :daily], to: :event_root, guard: :can_move_to_event?
+        transitions from: [:unsorted, :daily, :event_root, :subevent_level1, :subevent_level2], to: :event_root, guard: :can_move_to_event?
       end
 
       # From unsorted, daily, event_root, or subevent_level2 state to subevent_level1
@@ -58,79 +62,15 @@ module MediumAasm
         transitions from: [:unsorted, :daily, :event_root, :subevent_level1, :subevent_level2], to: :subevent_level2, guard: :can_move_to_subevent_level2?
       end
 
-      # From daily or event_root state to unsorted
+      # From daily, event_root, subevent_level1, or subevent_level2 state to unsorted
       event :move_to_unsorted do
         before do
-          perform_file_move(:unsorted)
+          capture_source_path_before_move
+          unless perform_file_move(:unsorted)
+            raise "Failed to move file to unsorted - file move operation failed"
+          end
         end
-        transitions from: [:daily, :event_root], to: :unsorted, guard: :can_move_to_unsorted?
-      end
-
-      # From event_root state
-      event :move_event_to_daily do
-        before do
-          perform_file_move(:daily)
-        end
-        transitions from: :event_root, to: :daily, guard: :can_move_to_daily?
-      end
-
-      # From subevent_level1 state
-      event :move_subevent1_to_unsorted do
-        before do
-          perform_file_move(:unsorted)
-        end
-        transitions from: :subevent_level1, to: :unsorted, guard: :can_move_to_unsorted?
-      end
-
-      event :move_subevent1_to_daily do
-        before do
-          perform_file_move(:daily)
-        end
-        transitions from: :subevent_level1, to: :daily, guard: :can_move_to_daily?
-      end
-
-      event :move_subevent1_to_event do
-        before do
-          perform_file_move(:event_root)
-        end
-        transitions from: :subevent_level1, to: :event_root, guard: :can_move_to_event?
-      end
-
-      event :move_subevent1_to_subevent2 do
-        before do
-          validate_to_events_transitions
-          perform_file_move(:subevent_level2)
-        end
-        transitions from: :subevent_level1, to: :subevent_level2, guard: :can_move_to_subevent_level2?
-      end
-
-      # From subevent_level2 state
-      event :move_subevent2_to_unsorted do
-        before do
-          perform_file_move(:unsorted)
-        end
-        transitions from: :subevent_level2, to: :unsorted, guard: :can_move_to_unsorted?
-      end
-
-      event :move_subevent2_to_daily do
-        before do
-          perform_file_move(:daily)
-        end
-        transitions from: :subevent_level2, to: :daily, guard: :can_move_to_daily?
-      end
-
-      event :move_subevent2_to_event do
-        before do
-          perform_file_move(:event_root)
-        end
-        transitions from: :subevent_level2, to: :event_root, guard: :can_move_to_event?
-      end
-
-      event :move_subevent2_to_subevent1 do
-        before do
-          perform_file_move(:subevent_level1)
-        end
-        transitions from: :subevent_level2, to: :subevent_level1, guard: :can_move_to_subevent_level1?
+        transitions from: [:daily, :event_root, :subevent_level1, :subevent_level2], to: :unsorted, guard: :can_move_to_unsorted?
       end
     end
 
@@ -241,10 +181,11 @@ module MediumAasm
   end
   
   # Move file to unsorted (only moves file, doesn't update DB)
-  def move_file_to_unsorted
+  def move_file_to_unsorted(source_path = nil)
     # Ensure we have fresh DB values in case the event folder was renamed mid-batch
     reload
-    source_path = full_file_path
+    # Use provided source_path or fall back to current full_file_path
+    source_path ||= full_file_path
     old_dir = File.dirname(source_path) if source_path && File.exist?(source_path) # Save old directory for cleanup
     dest_dir = Constants::UNSORTED_STORAGE
     
@@ -316,7 +257,7 @@ module MediumAasm
   end
   
   # Move file to daily storage (only moves file, doesn't update DB)
-  def move_file_to_daily
+  def move_file_to_daily(source_path = nil)
     unless has_valid_datetime?
       Rails.logger.error "Cannot move to daily - no valid datetime"
       return false
@@ -330,7 +271,8 @@ module MediumAasm
     daily_dir = File.join(Constants::DAILY_STORAGE, year, month, day)
     new_path = File.join(daily_dir, current_filename)
     
-    source_path = full_file_path
+    # Use provided source_path or fall back to current full_file_path
+    source_path ||= full_file_path
     old_dir = File.dirname(source_path) if source_path && File.exist?(source_path)
     FileUtils.mkdir_p(daily_dir) unless Dir.exist?(daily_dir)
     
