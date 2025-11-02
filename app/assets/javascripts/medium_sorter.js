@@ -1331,7 +1331,7 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
     
     // Find destination element
     const elementUnderMouse = document.elementFromPoint(e.clientX, e.clientY);
-    const destination = findDestinationElement(elementUnderMouse);
+    const destination = findDestinationElement(elementUnderMouse, e.clientX, e.clientY);
     
     // Clear previous destination highlighting
     clearDestinationHighlighting();
@@ -1478,7 +1478,7 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
     // Find destination element
     const elementUnderMouse = document.elementFromPoint(e.clientX, e.clientY);
     console.log('[MediumSorter] Element under mouse:', elementUnderMouse);
-    const destination = findDestinationElement(elementUnderMouse);
+    const destination = findDestinationElement(elementUnderMouse, e.clientX, e.clientY);
     
     if (destination) {
       console.log('[MediumSorter] ✅ Valid destination found:', destination);
@@ -1490,18 +1490,231 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
   }
   
   // Find destination element from mouse position
-  function findDestinationElement(element) {
+  // Optional mouseX and mouseY can be provided to check child elements more accurately
+  function findDestinationElement(element, mouseX, mouseY) {
     if (!element) {
       console.log('[MediumSorter] findDestinationElement: no element provided');
       return null;
     }
     
-    console.log('[MediumSorter] findDestinationElement: starting search from:', element.tagName, element.className);
+    console.log('[MediumSorter] findDestinationElement: starting search from:', element.tagName, element.className, {
+      id: element.id,
+      dataset: element.dataset,
+      parentElement: element.parentElement?.tagName
+    });
     
+    // FIRST: Check if the element itself is a container tree-item
+    if (element.classList && element.classList.contains('tree-item')) {
+      const itemType = element.getAttribute('data-type');
+      console.log('[MediumSorter] FIRST check: element is tree-item, type:', itemType);
+      if (itemType === 'event' || itemType === 'subevent_l1' || itemType === 'subevent_l2') {
+        // Found a container - check which column it's in
+        let listbox = element.closest('.medium-sorter-listbox');
+        if (!listbox) {
+          let parent = element.parentElement;
+          while (parent && parent !== document.body) {
+            if (parent.classList && parent.classList.contains('medium-sorter-listbox')) {
+              listbox = parent;
+              break;
+            }
+            parent = parent.parentElement;
+          }
+        }
+        const column = listbox ? listbox.getAttribute('data-column') : null;
+        console.log('[MediumSorter] FIRST check: container in column:', column, 'sourceColumn:', dragState.sourceColumn);
+        
+        if (column === 'events' && column !== dragState.sourceColumn) {
+          console.log('[MediumSorter] ✅ Found container - element itself is container:', itemType, {
+            dataKey: element.getAttribute('data-key'),
+            className: element.className
+          });
+          return { type: 'container', element: element, itemType: itemType };
+        }
+      }
+    }
+    
+    // SECOND: Walk up from the element to find the closest container tree-item
+    // This handles the case where we're hovering over a child element (tree-toggle, tree-label, etc.)
+    // of a container <li>
+    let walker = element;
+    let walkDepth = 0;
+    while (walker && walkDepth < 10) {
+      // Check if walker is a tree-item (including element itself if it's a tree-item we haven't returned yet)
+      if (walker.classList && walker.classList.contains('tree-item')) {
+        const itemType = walker.getAttribute('data-type');
+        console.log('[MediumSorter] Walk-up found tree-item:', { itemType, depth: walkDepth, walker: walker.tagName });
+        if (itemType === 'event' || itemType === 'subevent_l1' || itemType === 'subevent_l2') {
+          // Found a container - check which column it's in
+          let listbox = walker.closest('.medium-sorter-listbox');
+          if (!listbox) {
+            let parent = walker.parentElement;
+            while (parent && parent !== document.body) {
+              if (parent.classList && parent.classList.contains('medium-sorter-listbox')) {
+                listbox = parent;
+                break;
+              }
+              parent = parent.parentElement;
+            }
+          }
+          const column = listbox ? listbox.getAttribute('data-column') : null;
+          console.log('[MediumSorter] Container tree-item in column:', column, 'sourceColumn:', dragState.sourceColumn);
+          
+          if (column === 'events' && column !== dragState.sourceColumn) {
+            console.log('[MediumSorter] ✅ Found container when walking up from element:', itemType, 'depth:', walkDepth);
+            return { type: 'container', element: walker, itemType: itemType };
+          }
+        }
+      }
+      walker = walker.parentElement;
+      walkDepth++;
+    }
+    
+    // If we didn't find a container directly, continue with the main search
     // Walk up the DOM tree to find a valid destination
+    // Start from the element itself, not its parent (in case element is already a tree-item)
+    // IMPORTANT: We want to find the CLOSEST container to the mouse position, not walk all the way up
     let current = element;
     let depth = 0;
     while (current && current !== document.body && depth < 20) {
+      console.log('[MediumSorter] findDestinationElement: depth', depth, 'checking', current.tagName, {
+        hasClassList: !!current.classList,
+        className: current.className,
+        id: current.id
+      });
+      
+      // Special case: if we find ul.tree-root, check its children for container <li> elements
+      // This handles the case where elementFromPoint returns the <ul> instead of the <li> inside it
+      if (current.tagName === 'UL' && current.classList && current.classList.contains('tree-root')) {
+        console.log('[MediumSorter] Found tree-root ul, checking children for container <li>');
+        
+        // Walk up to find the listbox first to determine column
+        let listbox = current.closest('.medium-sorter-listbox');
+        let parent = current.parentElement;
+        while (!listbox && parent && parent !== document.body) {
+          if (parent.classList && parent.classList.contains('medium-sorter-listbox')) {
+            listbox = parent;
+            break;
+          }
+          parent = parent.parentElement;
+        }
+        const column = listbox ? listbox.getAttribute('data-column') : null;
+        console.log('[MediumSorter] tree-root is in column:', column);
+        
+        // Only check children if we're in the events column and not dragging from the same column
+        if (column === 'events' && column !== dragState.sourceColumn) {
+          // Check children to find which one is under the mouse
+          const children = current.children;
+          let targetChild = null;
+          
+          // If we have mouse coordinates, check which child's bounding box contains the mouse
+          if (mouseX !== undefined && mouseY !== undefined) {
+            for (let i = 0; i < children.length; i++) {
+              const child = children[i];
+              if (child.classList && child.classList.contains('tree-item')) {
+                const rect = child.getBoundingClientRect();
+                if (mouseX >= rect.left && mouseX <= rect.right && 
+                    mouseY >= rect.top && mouseY <= rect.bottom) {
+                  console.log('[MediumSorter] Mouse is over child tree-item:', child.getAttribute('data-type'));
+                  targetChild = child;
+                  break;
+                }
+              }
+            }
+          }
+          
+          // If no target child found with mouse coordinates, check all children (fallback)
+          if (!targetChild) {
+            console.log('[MediumSorter] No specific child found, checking all children');
+            for (let i = 0; i < children.length; i++) {
+              const child = children[i];
+              if (child.classList && child.classList.contains('tree-item')) {
+                const itemType = child.getAttribute('data-type');
+                if (itemType === 'event' || itemType === 'subevent_l1' || itemType === 'subevent_l2') {
+                  targetChild = child;
+                  break;
+                }
+              }
+            }
+          }
+          
+          // If we found a target child, check if it's a container
+          if (targetChild) {
+            const itemType = targetChild.getAttribute('data-type');
+            console.log('[MediumSorter] Found target child in tree-root:', { itemType, tagName: targetChild.tagName });
+            
+            if (itemType === 'event' || itemType === 'subevent_l1' || itemType === 'subevent_l2') {
+              console.log('[MediumSorter] ✅ Destination: container from tree-root child', itemType);
+              return { type: 'container', element: targetChild, itemType: itemType };
+            }
+          }
+        }
+        // If no child container found, continue walking up
+      }
+      
+      // Special case: if we find ul.tree-children, check what's actually under the mouse
+      // This handles dragging onto the contents area of a container
+      if (current.tagName === 'UL' && current.classList && current.classList.contains('tree-children')) {
+        console.log('[MediumSorter] Found tree-children ul, checking what\'s actually under the mouse');
+        
+        // Walk up to find the listbox first to determine column
+        let listbox = current.closest('.medium-sorter-listbox');
+        let parent = current.parentElement;
+        while (!listbox && parent && parent !== document.body) {
+          if (parent.classList && parent.classList.contains('medium-sorter-listbox')) {
+            listbox = parent;
+            break;
+          }
+          parent = parent.parentElement;
+        }
+        const column = listbox ? listbox.getAttribute('data-column') : null;
+        console.log('[MediumSorter] tree-children is in column:', column);
+        
+        // Only check if we're in the events column and not dragging from the same column
+        if (column === 'events' && column !== dragState.sourceColumn) {
+          // First, use mouse coordinates to find what's actually under the mouse within this tree-children
+          if (mouseX !== undefined && mouseY !== undefined) {
+            // Check children of this tree-children to see which one is under the mouse
+            const children = current.children;
+            for (let i = 0; i < children.length; i++) {
+              const child = children[i];
+              if (child.classList && child.classList.contains('tree-item')) {
+                const rect = child.getBoundingClientRect();
+                if (mouseX >= rect.left && mouseX <= rect.right && 
+                    mouseY >= rect.top && mouseY <= rect.bottom) {
+                  const itemType = child.getAttribute('data-type');
+                  console.log('[MediumSorter] Mouse is over child tree-item in tree-children:', itemType);
+                  
+                  // If it's a container (SL1 or SL2), return it directly
+                  if (itemType === 'subevent_l1' || itemType === 'subevent_l2') {
+                    console.log('[MediumSorter] ✅ Destination: container from tree-children child', itemType);
+                    return { type: 'container', element: child, itemType: itemType };
+                  }
+                  // If it's a medium, find its container (but we shouldn't get here since medium handling is elsewhere)
+                  break;
+                }
+              }
+            }
+          }
+          
+          // Fallback: check previous sibling for the container (for event-level tree-children)
+          let sibling = current.previousElementSibling;
+          console.log('[MediumSorter] Checking previous sibling:', sibling?.tagName, sibling?.className);
+          while (sibling) {
+            if (sibling.classList && sibling.classList.contains('tree-item')) {
+              const itemType = sibling.getAttribute('data-type');
+              console.log('[MediumSorter] Found sibling tree-item:', { itemType, column, sourceColumn: dragState.sourceColumn });
+              
+              if (itemType === 'event' || itemType === 'subevent_l1' || itemType === 'subevent_l2') {
+                console.log('[MediumSorter] ✅ Destination: container from sibling', itemType);
+                return { type: 'container', element: sibling, itemType: itemType };
+              }
+            }
+            sibling = sibling.previousElementSibling;
+          }
+        }
+        // If no container found, continue walking up
+      }
+      
       // Check if this is a listbox (for unsorted/daily)
       if (current.classList && current.classList.contains('medium-sorter-listbox')) {
         const column = current.getAttribute('data-column');
@@ -1517,15 +1730,64 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
           console.log('[MediumSorter] ✅ Destination: listbox', column);
           return { type: 'listbox', element: current, column: column };
         }
+        
+        // For events, continue searching for tree-items (containers) inside
+        // Don't return null here - continue to find tree-items
       }
       
       // Check if this is a container or medium (for events)
+      // IMPORTANT: Check current element FIRST before walking up, to find the CLOSEST container
+      let treeItem = null;
+      let treeItemDepth = 0;
+      
+      // First check if current itself is a tree-item
       if (current.classList && current.classList.contains('tree-item')) {
-        const itemType = current.getAttribute('data-type');
-        const listbox = current.closest('.medium-sorter-listbox');
+        treeItem = current;
+        treeItemDepth = 0;
+      } else {
+        // Walk up to find a tree-item ancestor, but only a few levels to find the CLOSEST one
+        let walker = current;
+        let walkDepth = 0;
+        while (walker && walkDepth < 5) {
+          if (walker.classList && walker.classList.contains('tree-item')) {
+            treeItem = walker;
+            treeItemDepth = walkDepth;
+            break; // Found closest tree-item, stop here
+          }
+          walker = walker.parentElement;
+          walkDepth++;
+        }
+      }
+      
+      if (treeItem) {
+        const itemType = treeItem.getAttribute('data-type');
+        let listbox = treeItem.closest ? treeItem.closest('.medium-sorter-listbox') : null;
+        
+        // If closest doesn't work, walk up manually
+        if (!listbox) {
+          let parent = treeItem.parentElement;
+          while (parent && parent !== document.body) {
+            if (parent.classList && parent.classList.contains('medium-sorter-listbox')) {
+              listbox = parent;
+              break;
+            }
+            parent = parent.parentElement;
+          }
+        }
+        
         const column = listbox ? listbox.getAttribute('data-column') : null;
         
-        console.log('[MediumSorter] Found tree-item:', { itemType, column, sourceColumn: dragState.sourceColumn });
+        console.log('[MediumSorter] Found tree-item:', { 
+          itemType, 
+          column, 
+          sourceColumn: dragState.sourceColumn,
+          hasListbox: !!listbox,
+          tagName: treeItem.tagName,
+          className: treeItem.className,
+          originalElement: current.tagName,
+          originalClassName: current.className,
+          treeItemDepth: treeItemDepth
+        });
         
         // Can't drag to the same column
         if (column === dragState.sourceColumn) {
@@ -1538,17 +1800,27 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
           // If hovering over a medium, find its container
           if (itemType === 'medium') {
             console.log('[MediumSorter] Hovering over medium - finding container');
-            const container = findMediumContainer(current);
+            const container = findMediumContainer(treeItem);
             if (container) {
               console.log('[MediumSorter] ✅ Destination: medium container', container.itemType);
               return container;
+            } else {
+              console.log('[MediumSorter] ⚠️ Could not find container for medium');
             }
           }
           
-          // If hovering over a container, use it
+          // If hovering over a container (or inside it), use it directly
+          // CRITICAL: Return the CLOSEST container we found (not a parent)
+          // We stop the search here because we want the container closest to the mouse, not its parent
           if (itemType === 'event' || itemType === 'subevent_l1' || itemType === 'subevent_l2') {
-            console.log('[MediumSorter] ✅ Destination: container', itemType);
-            return { type: 'container', element: current, itemType: itemType };
+            console.log('[MediumSorter] ✅ Destination: container (direct)', itemType, {
+              element: treeItem.tagName,
+              className: treeItem.className,
+              dataKey: treeItem.getAttribute('data-key'),
+              depth: treeItemDepth,
+              stopping: 'search now'
+            });
+            return { type: 'container', element: treeItem, itemType: itemType };
           }
         }
       }
@@ -1562,17 +1834,55 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
   }
   
   // Find container for a medium item
+  // Note: HTML structure is <li.tree-item-event>...<ul.tree-children><li.tree-item-medium>...</li></ul>
+  // So medium's parent is <ul>, then we need to find the sibling <li.tree-item-event> before the <ul>
   function findMediumContainer(mediumElement) {
-    let current = mediumElement.parentElement;
-    while (current) {
+    console.log('[MediumSorter] findMediumContainer: starting from', mediumElement.tagName, mediumElement.className);
+    let current = mediumElement;
+    let depth = 0;
+    
+    // Walk up until we find the ul.tree-children
+    while (current && current !== document.body && depth < 20) {
+      console.log('[MediumSorter] findMediumContainer: checking', current.tagName, current.className, depth);
+      
+      // If we find ul.tree-children, the previous sibling should be the container li
+      if (current.tagName === 'UL' && current.classList && current.classList.contains('tree-children')) {
+        console.log('[MediumSorter] findMediumContainer: found tree-children ul');
+        
+        // Walk backwards through previous siblings to find the container li
+        let sibling = current.previousElementSibling;
+        while (sibling) {
+          if (sibling.classList && sibling.classList.contains('tree-item')) {
+            const itemType = sibling.getAttribute('data-type');
+            console.log('[MediumSorter] findMediumContainer: found sibling tree-item', itemType);
+            
+            if (itemType === 'event' || itemType === 'subevent_l1' || itemType === 'subevent_l2') {
+              console.log('[MediumSorter] ✅ findMediumContainer: found container', itemType);
+              return { type: 'container', element: sibling, itemType: itemType };
+            }
+          }
+          sibling = sibling.previousElementSibling;
+        }
+        
+        // If no previous sibling, walk up to parent and check siblings
+        current = current.parentElement;
+        continue;
+      }
+      
+      // Check if current is a tree-item container
       if (current.classList && current.classList.contains('tree-item')) {
         const itemType = current.getAttribute('data-type');
+        
         if (itemType === 'event' || itemType === 'subevent_l1' || itemType === 'subevent_l2') {
+          console.log('[MediumSorter] ✅ findMediumContainer: found container', itemType);
           return { type: 'container', element: current, itemType: itemType };
         }
       }
+      
       current = current.parentElement;
+      depth++;
     }
+    console.log('[MediumSorter] ❌ findMediumContainer: no container found after', depth, 'iterations');
     return null;
   }
   
