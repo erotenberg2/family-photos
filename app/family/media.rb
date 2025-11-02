@@ -1061,15 +1061,44 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
     end
   end
   
+  # Batch validation page from drag-and-drop in MediumSorter
+  collection_action :batch_validate_transition_from_sorter, method: :post do
+    media_ids = params[:media_ids].to_s.split(',').map(&:strip).reject(&:blank?).map(&:to_i)
+    transition_type = params[:transition_type]
+    target_event_id = params[:target_event_id]&.to_i
+    target_subevent_id = params[:target_subevent_id]&.to_i
+    
+    unless transition_type.present? && media_ids.any?
+      redirect_to collection_path, alert: "Missing required parameters"
+      return
+    end
+    
+    # Store in session (matching existing batch validation flow)
+    session[:batch_media_ids] = media_ids
+    session[:batch_transition] = transition_type.to_sym
+    session[:batch_target_event_id] = target_event_id if target_event_id
+    session[:batch_target_subevent_id] = target_subevent_id if target_subevent_id
+    
+    # Redirect to existing validation page
+    redirect_to batch_validate_transition_family_media_path
+  end
+  
   # Batch validation page - shows which media can be moved
   collection_action :batch_validate_transition, method: :get do
     @batch_media_ids = session[:batch_media_ids] || []
     @batch_transition = session[:batch_transition]
     @target_event_id = session[:batch_target_event_id]
+    @target_subevent_id = session[:batch_target_subevent_id]
     
     unless @batch_transition
       redirect_to collection_path, alert: "No batch transition specified"
       return
+    end
+    
+    # If subevent_id is specified, get the event_id from the subevent
+    if @target_subevent_id && !@target_event_id
+      subevent = Subevent.find_by(id: @target_subevent_id)
+      @target_event_id = subevent&.event_id
     end
     
     # Load target event if specified
@@ -1191,7 +1220,8 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
     batch_transition = session[:batch_transition]
     # Get event_id from session (set by event creation or selection) or params
     event_id = session[:batch_target_event_id] || params[:event_id]
-    subevent_id = params[:subevent2_id] || params[:subevent_id]
+    # Get subevent_id from session (from drag-and-drop) or params
+    subevent_id = session[:batch_target_subevent_id] || params[:subevent2_id] || params[:subevent_id]
     
     media = Medium.where(id: batch_media_ids)
     success_count = 0
@@ -1227,6 +1257,7 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
     session.delete(:batch_media_ids)
     session.delete(:batch_transition)
     session.delete(:batch_target_event_id)
+    session.delete(:batch_target_subevent_id)
     
     if error_count == 0 && event_id.present?
       redirect_to family_event_path(event_id), notice: "Successfully moved #{success_count} media files"

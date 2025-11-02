@@ -295,6 +295,24 @@
   -webkit-user-select: none;
   -moz-user-select: none;
   -ms-user-select: none;
+  
+  // Drag destination highlighting
+  &.drag-destination {
+    border: 2px solid #007bff;
+    background: #e7f3ff;
+  }
+  
+  // Container highlighting during drag
+  .tree-item.drag-destination {
+    background: #cfe2ff;
+    border: 2px solid #0056b3;
+  }
+  
+  // Disable pointer events on non-destination items during drag
+  &.dragging .tree-item:not(.drag-destination):not(.selected) {
+    opacity: 0.5;
+    pointer-events: none;
+  }
 }
 
 // Tree structure styles
@@ -323,6 +341,20 @@
   &.selected {
     background: #cce5ff;
     border: 1px solid #007bff;
+    
+    // Drag state: when multiple items are selected, show grab cursor
+    &.draggable {
+      cursor: grab;
+      
+      &:hover {
+        cursor: grab;
+      }
+      
+      &.dragging {
+        cursor: grabbing;
+        opacity: 0.7;
+      }
+    }
   }
   
   &.tree-item-year {

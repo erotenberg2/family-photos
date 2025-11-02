@@ -19,6 +19,17 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
   // Store last clicked item per column for range selection
   let lastClickedItemByColumn = {};
   
+  // Drag and drop state tracking
+  let dragState = {
+    isDragging: false,
+    dragStartPos: null,
+    selectedMediaIds: [],
+    sourceColumn: null,
+    destinationElement: null,
+    destinationType: null,
+    dragThreshold: 5 // pixels to move before drag starts
+  };
+  
   // Get multi_photos.png path from Rails data attribute
   function getMultiPhotosPath() {
     const container = document.getElementById('medium-sorter-container');
@@ -345,7 +356,11 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
       // Prevent text selection using selectstart event (IE/Safari)
       item.addEventListener('selectstart', function(e) {
         // Don't interfere with tree toggle
-        if (e.target.closest('.tree-toggle')) return;
+        let target = e.target;
+        if (target.nodeType !== Node.ELEMENT_NODE) {
+          target = target.parentElement;
+        }
+        if (target && target.closest && target.closest('.tree-toggle')) return;
         e.preventDefault();
         return false;
       });
@@ -362,7 +377,11 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
       
       item.addEventListener('click', function(e) {
         // Don't interfere with tree toggle
-        if (e.target.closest('.tree-toggle')) return;
+        let target = e.target;
+        if (target.nodeType !== Node.ELEMENT_NODE) {
+          target = target.parentElement;
+        }
+        if (target && target.closest && target.closest('.tree-toggle')) return;
         
         // Prevent default text selection behavior
         e.preventDefault();
@@ -415,9 +434,18 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
         // Update info panel
         updateInfoPanel(column, listbox);
         
+        // Update draggable state after selection changes
+        setTimeout(updateDraggableState, 0);
+        
         e.stopPropagation();
       });
     });
+    
+    // Initialize drag and drop
+    initializeDragAndDrop();
+    
+    // Update draggable state after initial render
+    setTimeout(updateDraggableState, 100);
     
     console.log('[MediumSorter] Event listeners attached successfully');
   }
@@ -1209,6 +1237,513 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
     setTimeout(() => {
       document.addEventListener('click', closeMenu);
     }, 0);
+  }
+  
+  // Initialize drag and drop functionality
+  function initializeDragAndDrop() {
+    // Update draggable state when selections change
+    document.addEventListener('click', function(e) {
+      let target = e.target;
+      if (target.nodeType !== Node.ELEMENT_NODE) {
+        target = target.parentElement;
+      }
+      if (target && target.closest && target.closest('.tree-item')) {
+        setTimeout(updateDraggableState, 0);
+      }
+    });
+    
+    // Global mousemove handler for drag tracking
+    document.addEventListener('mousemove', handleMouseMove);
+    
+    // Global mouseup handler for drag completion
+    document.addEventListener('mouseup', handleMouseUp);
+    
+    // Global ESC key handler for drag cancellation
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape' && dragState.isDragging) {
+        cancelDrag();
+      }
+    });
+    
+    console.log('[MediumSorter] Drag and drop initialized');
+  }
+  
+  // Update draggable state based on selected items
+  function updateDraggableState() {
+    console.log('[MediumSorter] updateDraggableState called');
+    const allListboxes = document.querySelectorAll('.medium-sorter-listbox');
+    console.log('[MediumSorter] Found', allListboxes.length, 'listboxes');
+    
+    allListboxes.forEach(listbox => {
+      const selectedItems = listbox.querySelectorAll('.tree-item.selected');
+      const selectedMediaItems = Array.from(selectedItems).filter(item => 
+        item.getAttribute('data-type') === 'medium'
+      );
+      
+      console.log('[MediumSorter] Listbox', listbox.getAttribute('data-column'), ':', {
+        totalSelected: selectedItems.length,
+        selectedMedia: selectedMediaItems.length
+      });
+      
+      // Only media items can be dragged
+      selectedItems.forEach(item => {
+        const itemType = item.getAttribute('data-type');
+        const isMedia = itemType === 'medium';
+        const hasSelectedMedia = selectedMediaItems.length > 0;
+        
+        if (hasSelectedMedia && isMedia) {
+          item.classList.add('draggable');
+          console.log('[MediumSorter] ✅ Added draggable to:', item.getAttribute('data-key'));
+        } else {
+          item.classList.remove('draggable');
+          if (isMedia && !hasSelectedMedia) {
+            console.log('[MediumSorter] ❌ Removed draggable from:', item.getAttribute('data-key'), '- no selected media');
+          }
+        }
+      });
+    });
+    
+    console.log('[MediumSorter] updateDraggableState completed');
+  }
+  
+  // Handle mouse move during drag
+  function handleMouseMove(e) {
+    if (!dragState.isDragging && dragState.dragStartPos) {
+      // Check if mouse moved enough to start drag
+      const dx = e.clientX - dragState.dragStartPos.x;
+      const dy = e.clientY - dragState.dragStartPos.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      
+      if (distance >= dragState.dragThreshold) {
+        console.log('[MediumSorter] Drag threshold exceeded, starting drag:', {
+          distance: distance.toFixed(2),
+          threshold: dragState.dragThreshold
+        });
+        startDrag(e);
+      }
+      return;
+    }
+    
+    if (!dragState.isDragging) return;
+    
+    // Update cursor
+    document.body.style.cursor = 'grabbing';
+    
+    // Find destination element
+    const elementUnderMouse = document.elementFromPoint(e.clientX, e.clientY);
+    const destination = findDestinationElement(elementUnderMouse);
+    
+    // Clear previous destination highlighting
+    clearDestinationHighlighting();
+    
+    // Highlight new destination
+    if (destination) {
+      console.log('[MediumSorter] Destination found:', {
+        type: destination.type,
+        column: destination.column || destination.itemType,
+        element: destination.element
+      });
+      highlightDestination(destination);
+    }
+  }
+  
+  // Handle mouse down on selected items
+  document.addEventListener('mousedown', function(e) {
+    // Ensure e.target is an Element (could be a text node, etc.)
+    let target = e.target;
+    if (target.nodeType !== Node.ELEMENT_NODE) {
+      target = target.parentElement;
+    }
+    if (!target || !target.closest) return;
+    
+    const treeItem = target.closest('.tree-item');
+    if (!treeItem) return;
+    
+    const itemType = treeItem.getAttribute('data-type');
+    const isSelected = treeItem.classList.contains('selected');
+    const isDraggable = treeItem.classList.contains('draggable');
+    const isMedia = itemType === 'medium';
+    
+    console.log('[MediumSorter] MouseDown on tree item:', {
+      isSelected: isSelected,
+      isDraggable: isDraggable,
+      isMedia: isMedia,
+      itemType: itemType,
+      itemKey: treeItem.getAttribute('data-key')
+    });
+    
+    // Only start drag detection if clicking on a selected media item
+    // (Check if it's media type, not just the draggable class, since the class might not be set yet)
+    if (isSelected && isMedia) {
+      // Don't interfere with tree toggle or context menu
+      if (target.closest('.tree-toggle') || e.button !== 0) {
+        console.log('[MediumSorter] Drag cancelled - tree toggle or non-left button');
+        return;
+      }
+      
+      console.log('[MediumSorter] ✅ Starting drag detection');
+      dragState.dragStartPos = { x: e.clientX, y: e.clientY };
+      
+      // Get selected media IDs from this column
+      const listbox = treeItem.closest('.medium-sorter-listbox');
+      const column = listbox ? listbox.getAttribute('data-column') : null;
+      
+      if (column) {
+        const selectedItems = listbox.querySelectorAll('.tree-item.selected[data-type="medium"]');
+        console.log('[MediumSorter] Found', selectedItems.length, 'selected media items in column:', column);
+        
+        dragState.selectedMediaIds = Array.from(selectedItems).map(item => {
+          const key = item.getAttribute('data-key');
+          const lookupKey = `${key}_${column}`;
+          const itemData = treeDataByKey[lookupKey];
+          const mediaId = itemData && itemData.data ? itemData.data.medium_id || itemData.data.id : null;
+          console.log('[MediumSorter] Processing item:', { key, lookupKey, mediaId, hasData: !!itemData });
+          return mediaId;
+        }).filter(id => id !== null);
+        
+        dragState.sourceColumn = column;
+        
+        console.log('[MediumSorter] Drag detected:', {
+          selectedMediaIds: dragState.selectedMediaIds,
+          count: dragState.selectedMediaIds.length,
+          sourceColumn: dragState.sourceColumn,
+          startPos: dragState.dragStartPos
+        });
+      } else {
+        console.warn('[MediumSorter] No column found for tree item');
+      }
+    }
+  });
+  
+  // Start drag operation
+  function startDrag(e) {
+    if (dragState.selectedMediaIds.length === 0) {
+      console.warn('[MediumSorter] Drag cancelled - no selected media IDs');
+      cancelDrag();
+      return;
+    }
+    
+    console.log('[MediumSorter] 🚀 Drag started!', {
+      itemCount: dragState.selectedMediaIds.length,
+      sourceColumn: dragState.sourceColumn,
+      mediaIds: dragState.selectedMediaIds
+    });
+    
+    dragState.isDragging = true;
+    document.body.style.cursor = 'grabbing';
+    
+    // Add dragging class to all listboxes
+    const allListboxes = document.querySelectorAll('.medium-sorter-listbox');
+    console.log('[MediumSorter] Adding dragging class to', allListboxes.length, 'listboxes');
+    allListboxes.forEach(listbox => {
+      listbox.classList.add('dragging');
+    });
+    
+    // Update selected items
+    const sourceListbox = document.querySelector(`.medium-sorter-listbox[data-column="${dragState.sourceColumn}"]`);
+    if (sourceListbox) {
+      const selectedItems = sourceListbox.querySelectorAll('.tree-item.selected');
+      console.log('[MediumSorter] Adding dragging class to', selectedItems.length, 'selected items');
+      selectedItems.forEach(item => {
+        item.classList.add('dragging');
+      });
+    } else {
+      console.warn('[MediumSorter] Source listbox not found for column:', dragState.sourceColumn);
+    }
+    
+    console.log('[MediumSorter] ✅ Drag operation active');
+  }
+  
+  // Handle mouse up (drag completion)
+  function handleMouseUp(e) {
+    console.log('[MediumSorter] MouseUp event:', {
+      hasDragStartPos: !!dragState.dragStartPos,
+      isDragging: dragState.isDragging
+    });
+    
+    // If we were in the process of starting a drag but haven't moved enough
+    if (dragState.dragStartPos && !dragState.isDragging) {
+      console.log('[MediumSorter] Drag cancelled - mouse moved but threshold not reached');
+      dragState.dragStartPos = null;
+      return;
+    }
+    
+    if (!dragState.isDragging) {
+      console.log('[MediumSorter] MouseUp but not dragging - ignoring');
+      return;
+    }
+    
+    console.log('[MediumSorter] 🎯 MouseUp during drag - finding destination');
+    
+    // Find destination element
+    const elementUnderMouse = document.elementFromPoint(e.clientX, e.clientY);
+    console.log('[MediumSorter] Element under mouse:', elementUnderMouse);
+    const destination = findDestinationElement(elementUnderMouse);
+    
+    if (destination) {
+      console.log('[MediumSorter] ✅ Valid destination found:', destination);
+      completeDrag(destination);
+    } else {
+      console.warn('[MediumSorter] ❌ No valid destination found - cancelling drag');
+      cancelDrag();
+    }
+  }
+  
+  // Find destination element from mouse position
+  function findDestinationElement(element) {
+    if (!element) {
+      console.log('[MediumSorter] findDestinationElement: no element provided');
+      return null;
+    }
+    
+    console.log('[MediumSorter] findDestinationElement: starting search from:', element.tagName, element.className);
+    
+    // Walk up the DOM tree to find a valid destination
+    let current = element;
+    let depth = 0;
+    while (current && current !== document.body && depth < 20) {
+      // Check if this is a listbox (for unsorted/daily)
+      if (current.classList && current.classList.contains('medium-sorter-listbox')) {
+        const column = current.getAttribute('data-column');
+        console.log('[MediumSorter] Found listbox:', column);
+        // Can't drag to the same column
+        if (column === dragState.sourceColumn) {
+          console.log('[MediumSorter] Cannot drag to same column:', column);
+          return null;
+        }
+        
+        // For unsorted or daily, the listbox itself is the destination
+        if (column === 'unsorted' || column === 'daily') {
+          console.log('[MediumSorter] ✅ Destination: listbox', column);
+          return { type: 'listbox', element: current, column: column };
+        }
+      }
+      
+      // Check if this is a container or medium (for events)
+      if (current.classList && current.classList.contains('tree-item')) {
+        const itemType = current.getAttribute('data-type');
+        const listbox = current.closest('.medium-sorter-listbox');
+        const column = listbox ? listbox.getAttribute('data-column') : null;
+        
+        console.log('[MediumSorter] Found tree-item:', { itemType, column, sourceColumn: dragState.sourceColumn });
+        
+        // Can't drag to the same column
+        if (column === dragState.sourceColumn) {
+          console.log('[MediumSorter] Cannot drag to same column:', column);
+          return null;
+        }
+        
+        // For events column, find the container
+        if (column === 'events') {
+          // If hovering over a medium, find its container
+          if (itemType === 'medium') {
+            console.log('[MediumSorter] Hovering over medium - finding container');
+            const container = findMediumContainer(current);
+            if (container) {
+              console.log('[MediumSorter] ✅ Destination: medium container', container.itemType);
+              return container;
+            }
+          }
+          
+          // If hovering over a container, use it
+          if (itemType === 'event' || itemType === 'subevent_l1' || itemType === 'subevent_l2') {
+            console.log('[MediumSorter] ✅ Destination: container', itemType);
+            return { type: 'container', element: current, itemType: itemType };
+          }
+        }
+      }
+      
+      current = current.parentElement;
+      depth++;
+    }
+    
+    console.log('[MediumSorter] ❌ No valid destination found after', depth, 'iterations');
+    return null;
+  }
+  
+  // Find container for a medium item
+  function findMediumContainer(mediumElement) {
+    let current = mediumElement.parentElement;
+    while (current) {
+      if (current.classList && current.classList.contains('tree-item')) {
+        const itemType = current.getAttribute('data-type');
+        if (itemType === 'event' || itemType === 'subevent_l1' || itemType === 'subevent_l2') {
+          return { type: 'container', element: current, itemType: itemType };
+        }
+      }
+      current = current.parentElement;
+    }
+    return null;
+  }
+  
+  // Highlight destination
+  function highlightDestination(destination) {
+    if (destination.type === 'listbox') {
+      destination.element.classList.add('drag-destination');
+      dragState.destinationElement = destination.element;
+      dragState.destinationType = destination.column;
+    } else if (destination.type === 'container') {
+      destination.element.classList.add('drag-destination');
+      // Also highlight parent containers if needed
+      let parent = destination.element.parentElement;
+      while (parent) {
+        if (parent.classList && parent.classList.contains('tree-item')) {
+          const itemType = parent.getAttribute('data-type');
+          if (itemType === 'event' || itemType === 'subevent_l1') {
+            parent.classList.add('drag-destination');
+          }
+        }
+        parent = parent.parentElement;
+      }
+      dragState.destinationElement = destination.element;
+      dragState.destinationType = destination.itemType;
+    }
+  }
+  
+  // Clear destination highlighting
+  function clearDestinationHighlighting() {
+    document.querySelectorAll('.drag-destination').forEach(el => {
+      el.classList.remove('drag-destination');
+    });
+  }
+  
+  // Complete drag operation
+  function completeDrag(destination) {
+    console.log('[MediumSorter] Drag completed to destination:', destination);
+    
+    // Determine transition type and destination info
+    let transitionType = null;
+    let targetEventId = null;
+    let targetSubeventId = null;
+    
+    if (destination.type === 'listbox') {
+      // Unsorted or Daily
+      if (destination.column === 'unsorted') {
+        transitionType = 'move_to_unsorted';
+      } else if (destination.column === 'daily') {
+        transitionType = 'move_to_daily';
+      }
+    } else if (destination.type === 'container') {
+      // Event container
+      const itemKey = destination.element.getAttribute('data-key');
+      const column = 'events';
+      const lookupKey = `${itemKey}_${column}`;
+      const itemData = treeDataByKey[lookupKey];
+      
+      if (!itemData || !itemData.data) {
+        console.error('[MediumSorter] Could not find container data for:', lookupKey);
+        cancelDrag();
+        return;
+      }
+      
+      if (destination.itemType === 'event') {
+        transitionType = 'move_to_event';
+        targetEventId = itemData.data.event_id;
+      } else if (destination.itemType === 'subevent_l1') {
+        transitionType = 'move_to_subevent_level1';
+        targetEventId = itemData.data.event_id;
+        targetSubeventId = itemData.data.subevent_id;
+      } else if (destination.itemType === 'subevent_l2') {
+        transitionType = 'move_to_subevent_level2';
+        targetEventId = itemData.data.event_id;
+        targetSubeventId = itemData.data.subevent_id;
+      }
+    }
+    
+    if (!transitionType) {
+      console.error('[MediumSorter] Could not determine transition type');
+      cancelDrag();
+      return;
+    }
+    
+    // Redirect to validation page
+    redirectToValidationPage(transitionType, targetEventId, targetSubeventId);
+    
+    // Clean up
+    cancelDrag();
+  }
+  
+  // Cancel drag operation
+  function cancelDrag() {
+    dragState.isDragging = false;
+    dragState.dragStartPos = null;
+    dragState.destinationElement = null;
+    dragState.destinationType = null;
+    
+    document.body.style.cursor = '';
+    
+    // Remove dragging classes
+    const allListboxes = document.querySelectorAll('.medium-sorter-listbox');
+    allListboxes.forEach(listbox => {
+      listbox.classList.remove('dragging');
+      listbox.classList.remove('drag-destination');
+    });
+    
+    document.querySelectorAll('.tree-item').forEach(item => {
+      item.classList.remove('dragging');
+      item.classList.remove('drag-destination');
+    });
+    
+    clearDestinationHighlighting();
+    
+    console.log('[MediumSorter] Drag cancelled');
+  }
+  
+  // Redirect to validation page
+  function redirectToValidationPage(transitionType, targetEventId, targetSubeventId) {
+    // Build URL with media IDs as query parameters
+    const mediaIdsParam = dragState.selectedMediaIds.join(',');
+    const baseUrl = '/family/media/batch_validate_transition_from_sorter';
+    
+    // Create a form to POST the data (since we need to set session variables)
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = baseUrl;
+    
+    // Add media IDs
+    const mediaIdsInput = document.createElement('input');
+    mediaIdsInput.type = 'hidden';
+    mediaIdsInput.name = 'media_ids';
+    mediaIdsInput.value = mediaIdsParam;
+    form.appendChild(mediaIdsInput);
+    
+    // Add transition type
+    const transitionInput = document.createElement('input');
+    transitionInput.type = 'hidden';
+    transitionInput.name = 'transition_type';
+    transitionInput.value = transitionType;
+    form.appendChild(transitionInput);
+    
+    // Add target event ID if present
+    if (targetEventId) {
+      const eventInput = document.createElement('input');
+      eventInput.type = 'hidden';
+      eventInput.name = 'target_event_id';
+      eventInput.value = targetEventId;
+      form.appendChild(eventInput);
+    }
+    
+    // Add target subevent ID if present
+    if (targetSubeventId) {
+      const subeventInput = document.createElement('input');
+      subeventInput.type = 'hidden';
+      subeventInput.name = 'target_subevent_id';
+      subeventInput.value = targetSubeventId;
+      form.appendChild(subeventInput);
+    }
+    
+    // Add CSRF token (Rails requires this)
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+    if (csrfToken) {
+      const csrfInput = document.createElement('input');
+      csrfInput.type = 'hidden';
+      csrfInput.name = 'authenticity_token';
+      csrfInput.value = csrfToken;
+      form.appendChild(csrfInput);
+    }
+    
+    document.body.appendChild(form);
+    form.submit();
   }
   
   function filterByYear(items, year) {
