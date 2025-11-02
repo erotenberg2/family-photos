@@ -5,9 +5,34 @@
   
   <% if @target_event %>
     <div class="target-event-info">
-      <h3>📍 Target Event: <%= @target_event.title %></h3>
-      <p><%= @target_event.description %></p>
-      <p><strong>Date Range:</strong> <%= @target_event.start_date.strftime('%Y-%m-%d') %> to <%= @target_event.end_date.strftime('%Y-%m-%d') %></p>
+      <h3>📍 Target Destination</h3>
+      <div class="destination-hierarchy">
+        <div class="destination-level">
+          <strong>Event:</strong> <%= @target_event.title %>
+          <% if @target_event.description.present? %>
+            <p class="destination-description"><%= @target_event.description %></p>
+          <% end %>
+          <p class="destination-dates"><strong>Date Range:</strong> <%= @target_event.start_date.strftime('%Y-%m-%d') %> to <%= @target_event.end_date.strftime('%Y-%m-%d') %></p>
+        </div>
+        
+        <% if @target_subevent_l1 %>
+          <div class="destination-level subevent-level-1">
+            <strong>Subevent (Level 1):</strong> <%= @target_subevent_l1.title %>
+            <% if @target_subevent_l1.description.present? %>
+              <p class="destination-description"><%= @target_subevent_l1.description %></p>
+            <% end %>
+          </div>
+        <% end %>
+        
+        <% if @target_subevent_l2 %>
+          <div class="destination-level subevent-level-2">
+            <strong>Subevent (Level 2):</strong> <%= @target_subevent_l2.title %>
+            <% if @target_subevent_l2.description.present? %>
+              <p class="destination-description"><%= @target_subevent_l2.description %></p>
+            <% end %>
+          </div>
+        <% end %>
+      </div>
     </div>
   <% end %>
   
@@ -81,8 +106,17 @@
         <% end %>
       <% elsif @target_event %>
         <%# Event already selected, execute transition %>
+        <% 
+          destination_text = if @target_subevent_l2
+            "Move #{@movable_count} Files to #{@target_subevent_l2.title} (Level 2)"
+          elsif @target_subevent_l1
+            "Move #{@movable_count} Files to #{@target_subevent_l1.title} (Level 1)"
+          else
+            "Move #{@movable_count} Files to #{@target_event.title}"
+          end
+        %>
         <%= form_tag batch_complete_transition_family_media_path, method: :post do %>
-          <%= submit_tag "Move #{@movable_count} Files to Event", class: 'btn btn-primary' %>
+          <%= submit_tag destination_text, class: 'btn btn-primary' %>
         <% end %>
       <% else %>
         <%# Event/subevent transition - need to select destination %>
@@ -118,6 +152,39 @@
 
 .target-event-info p {
   margin: 5px 0;
+}
+
+.destination-hierarchy {
+  margin-top: 10px;
+}
+
+.destination-level {
+  margin-bottom: 15px;
+  padding: 10px;
+  background: #f8f9fa;
+  border-left: 3px solid #007bff;
+  border-radius: 3px;
+}
+
+.destination-level.subevent-level-1 {
+  margin-left: 20px;
+  border-left-color: #28a745;
+}
+
+.destination-level.subevent-level-2 {
+  margin-left: 40px;
+  border-left-color: #ffc107;
+}
+
+.destination-description {
+  margin: 8px 0 0 0;
+  font-style: italic;
+  color: #6c757d;
+}
+
+.destination-dates {
+  margin: 8px 0 0 0;
+  color: #495057;
 }
 
 .transition-info {

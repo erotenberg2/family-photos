@@ -238,13 +238,61 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
     return result;
   }
 
+  // Storage key for expanded state
+  const EXPANDED_STATE_KEY = 'medium_sorter_expanded_state';
+  
+  // Load expanded state from localStorage
+  function loadExpandedState() {
+    try {
+      const saved = localStorage.getItem(EXPANDED_STATE_KEY);
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch (e) {
+      console.warn('[MediumSorter] Failed to load expanded state:', e);
+    }
+    return {};
+  }
+  
+  // Save expanded state to localStorage
+  function saveExpandedState(state) {
+    try {
+      localStorage.setItem(EXPANDED_STATE_KEY, JSON.stringify(state));
+    } catch (e) {
+      console.warn('[MediumSorter] Failed to save expanded state:', e);
+    }
+  }
+  
+  // Check if an item should be expanded based on saved state
+  function isItemExpanded(itemId) {
+    const state = loadExpandedState();
+    return state[itemId] === true;
+  }
+  
+  // Toggle expanded state for an item
+  function toggleItemExpandedState(itemId, isExpanded) {
+    const state = loadExpandedState();
+    if (isExpanded) {
+      state[itemId] = true;
+    } else {
+      delete state[itemId];
+    }
+    saveExpandedState(state);
+  }
+
   // Render a single tree item (recursive)
   function renderTreeItem(item, columnType, depth) {
     const indent = depth * 20;
     const hasChildren = item.children && item.children.length > 0;
     const itemId = `tree-item-${item.key}-${columnType}`;
-    // Start collapsed (collapsed icon) - user can expand by clicking
-    const iconClass = hasChildren ? 'tree-icon tree-icon-collapsed' : 'tree-icon tree-icon-leaf';
+    
+    // Check saved state - if expanded, show expanded icon and display children
+    const isExpanded = hasChildren && isItemExpanded(itemId);
+    const iconClass = hasChildren 
+      ? (isExpanded ? 'tree-icon tree-icon-expanded' : 'tree-icon tree-icon-collapsed')
+      : 'tree-icon tree-icon-leaf';
+    const childrenDisplay = isExpanded ? 'block' : 'none';
+    
     const itemClass = `tree-item tree-item-${item.type}`;
     
     // For media items, show the icon instead of tree toggle/leaf dot
@@ -264,8 +312,8 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
     `;
 
     if (hasChildren) {
-      // Start collapsed (display: none)
-      html += `<ul class="tree-children" id="${itemId}" style="display: none;">`;
+      // Use saved state to determine initial display
+      html += `<ul class="tree-children" id="${itemId}" style="display: ${childrenDisplay};">`;
       html += item.children.map(child => renderTreeItem(child, columnType, depth + 1)).join('');
       html += '</ul>';
     }
@@ -317,13 +365,19 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
         
         if (children) {
           if (children.style.display === 'none') {
+            // Expanding
             children.style.display = 'block';
             icon.classList.remove('tree-icon-collapsed');
             icon.classList.add('tree-icon-expanded');
+            // Save expanded state
+            toggleItemExpandedState(itemId, true);
           } else {
+            // Collapsing
             children.style.display = 'none';
             icon.classList.remove('tree-icon-expanded');
             icon.classList.add('tree-icon-collapsed');
+            // Save collapsed state
+            toggleItemExpandedState(itemId, false);
           }
         }
       });
@@ -365,10 +419,10 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
         return false;
       });
       
-      // Right-click context menu for event and subevent containers
+      // Right-click context menu for event, subevent containers, and medium items
       item.addEventListener('contextmenu', function(e) {
         const itemType = this.getAttribute('data-type');
-        if (itemType === 'event' || itemType === 'subevent_l1' || itemType === 'subevent_l2') {
+        if (itemType === 'event' || itemType === 'subevent_l1' || itemType === 'subevent_l2' || itemType === 'medium') {
           e.preventDefault();
           showContextMenu(e, this);
           return false;
@@ -710,6 +764,9 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
         ? `<a href="${mediumUrl}" class="info-preview-link">${imageHtml}</a>`
         : imageHtml;
       
+      // Build action buttons
+      const actionButtons = buildActionButtons('medium', data);
+      
       return `
         <div class="info-content">
           <div class="info-preview">${clickableImageHtml}</div>
@@ -723,9 +780,13 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
               ${data.effective_datetime ? `<div><strong>Date:</strong> ${new Date(data.effective_datetime).toLocaleString()}</div>` : ''}
             </div>
           </div>
+          ${actionButtons}
         </div>
       `;
     } else if (data.medium_type === 'audio') {
+      // Build action buttons
+      const actionButtons = buildActionButtons('medium', data);
+      
       return `
         <div class="info-content">
           <div class="info-preview"><div class="info-placeholder-icon">${data.icon || '🎵'}</div></div>
@@ -736,9 +797,13 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
               ${data.file_size_human ? `<div><strong>Size:</strong> ${data.file_size_human}</div>` : ''}
             </div>
           </div>
+          ${actionButtons}
         </div>
       `;
     } else if (data.medium_type === 'video') {
+      // Build action buttons
+      const actionButtons = buildActionButtons('medium', data);
+      
       return `
         <div class="info-content">
           <div class="info-preview"><div class="info-placeholder-icon">${data.icon || '🎬'}</div></div>
@@ -749,6 +814,7 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
               ${data.file_size_human ? `<div><strong>Size:</strong> ${data.file_size_human}</div>` : ''}
             </div>
           </div>
+          ${actionButtons}
         </div>
       `;
     }
@@ -832,7 +898,7 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
   }
 
   // Render info for event-container
-  // Build action buttons for event/subevent containers
+  // Build action buttons for event/subevent/medium items
   function buildActionButtons(itemType, itemData) {
     const buttons = [];
     
@@ -868,6 +934,20 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
         buttons.push({
           label: 'Create Subevent',
           url: `/family/subevents/new?event_id=${itemData.event_id}&parent_subevent_id=${itemData.subevent_id}`,
+          class: 'info-action-btn'
+        });
+      }
+    } else if (itemType === 'medium') {
+      const mediumId = itemData.medium_id || itemData.id;
+      if (mediumId) {
+        buttons.push({
+          label: 'Show',
+          url: `/family/media/${mediumId}`,
+          class: 'info-action-btn'
+        });
+        buttons.push({
+          label: 'Edit',
+          url: `/family/media/${mediumId}/edit`,
           class: 'info-action-btn'
         });
       }
@@ -1178,6 +1258,22 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
               parent_subevent_id: item.data.subevent_id
             });
             window.location.href = `/family/subevents/new?${params.toString()}`;
+          }
+        });
+      }
+    } else if (itemType === 'medium') {
+      const mediumId = item.data.medium_id || item.data.id;
+      if (mediumId) {
+        menuItems.push({
+          label: 'Show',
+          action: () => {
+            window.location.href = `/family/media/${mediumId}`;
+          }
+        });
+        menuItems.push({
+          label: 'Edit',
+          action: () => {
+            window.location.href = `/family/media/${mediumId}/edit`;
           }
         });
       }

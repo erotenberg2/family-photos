@@ -5,7 +5,6 @@ class ImagesController < ApplicationController
   def show
     Rails.logger.info "=== IMAGES CONTROLLER DEBUG ==="
     Rails.logger.info "Medium ID: #{@medium.id}"
-    Rails.logger.info "Medium file_path: #{@medium.file_path}"
     Rails.logger.info "Medium current_filename: #{@medium.current_filename}"
     Rails.logger.info "Medium full_file_path: #{@medium.full_file_path}"
     Rails.logger.info "Medium storage_state: #{@medium.aasm.current_state}"

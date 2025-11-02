@@ -10,7 +10,7 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
 
 
   # Permitted parameters
-  permit_params :file_path, :file_size, :original_filename, :content_type, :md5_hash,
+  permit_params :file_size, :original_filename, :content_type, :md5_hash,
                 :datetime_user, :datetime_intrinsic, :datetime_inferred, :medium_type, :uploaded_by_id, :user_id, :descriptive_name
 
   # Index page configuration
@@ -450,7 +450,9 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
         resource.mediable&.description || "No description"
       end
       row :original_filename
-      row :file_path
+      row "Storage Path" do |resource|
+        resource.computed_directory_path || "Not set"
+      end
       row :current_filename
       row :content_type
       row :file_size do |resource|
@@ -615,6 +617,17 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
           return
         end
         
+        # Set descriptive_name on the resource to trigger validation
+        resource.descriptive_name = new_descriptive_name
+        
+        # Validate descriptive_name before generating filename
+        unless resource.valid?
+          if resource.errors[:descriptive_name].any?
+            redirect_to edit_family_medium_path(resource), alert: resource.errors[:descriptive_name].first
+            return
+          end
+        end
+        
         begin
           # Generate new filename using datetime priority scheme
           new_filename = generate_filename_from_datetime_and_descriptive_name(resource, new_descriptive_name)
@@ -626,10 +639,13 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
           end
           
           # Also check if file exists on disk at the destination
-          new_full_path = File.join(resource.file_path, new_filename)
-          if File.exist?(new_full_path)
-            redirect_to edit_family_medium_path(resource), alert: "A file with this name already exists on disk."
-            return
+          dir_path = resource.computed_directory_path
+          if dir_path.present?
+            new_full_path = File.join(dir_path, new_filename)
+            if File.exist?(new_full_path)
+              redirect_to edit_family_medium_path(resource), alert: "A file with this name already exists on disk."
+              return
+            end
           end
           
           # Update the current_filename, which will trigger the callback to rename the file
@@ -1103,6 +1119,23 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
     
     # Load target event if specified
     @target_event = Event.find_by(id: @target_event_id) if @target_event_id
+    
+    # Load target subevent if specified
+    @target_subevent = Subevent.find_by(id: @target_subevent_id) if @target_subevent_id
+    
+    # Determine subevent levels
+    if @target_subevent
+      if @target_subevent.parent_subevent_id.present?
+        @target_subevent_l1 = @target_subevent.parent_subevent
+        @target_subevent_l2 = @target_subevent
+      else
+        @target_subevent_l1 = @target_subevent
+        @target_subevent_l2 = nil
+      end
+    else
+      @target_subevent_l1 = nil
+      @target_subevent_l2 = nil
+    end
     
     @media = Medium.where(id: @batch_media_ids)
     @validation_results = []

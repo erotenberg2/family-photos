@@ -40,6 +40,9 @@ class Medium < ApplicationRecord
     },
     message: 'must be a valid format for the medium type'
   }
+  
+  # Validation for descriptive_name (used in filename)
+  validate :descriptive_name_contains_no_illegal_characters
 
   # Callbacks for file operations
   before_update :rename_file_on_disk, if: :current_filename_changed?
@@ -395,6 +398,36 @@ class Medium < ApplicationRecord
   
   def file_exists?
     full_file_path.present? && File.exist?(full_file_path)
+  end
+
+  # Compute directory based on state and associations
+  def computed_directory_path
+    require_relative '../../lib/constants'
+    case storage_state.to_s
+    when 'unsorted'
+      Constants::UNSORTED_STORAGE
+    when 'daily'
+      return nil unless has_valid_datetime?
+      dt = effective_datetime
+      File.join(Constants::DAILY_STORAGE,
+               dt.year.to_s,
+               dt.month.to_s.rjust(2, '0'),
+               dt.day.to_s.rjust(2, '0'))
+    when 'event_root'
+      return nil unless event&.folder_name
+      File.join(Constants::EVENTS_STORAGE, event.folder_name)
+    when 'subevent_level1', 'subevent_level2'
+      return nil unless event&.folder_name && subevent
+      event_dir = File.join(Constants::EVENTS_STORAGE, event.folder_name)
+      if subevent.parent_subevent_id.present?
+        parent = subevent.parent_subevent
+        File.join(event_dir, parent.footer_name, subevent.footer_name)
+      else
+        File.join(event_dir, subevent.footer_name)
+      end
+    else
+      Constants::UNSORTED_STORAGE
+    end
   end
 
   # Get location from mediable's intrinsic file info (e.g., EXIF data)
@@ -1118,6 +1151,18 @@ class Medium < ApplicationRecord
 
   private
 
+  # Validation for descriptive_name (used in filename)
+  def descriptive_name_contains_no_illegal_characters
+    return unless descriptive_name.present?
+    # Illegal characters for macOS and Linux: / (forward slash) and null character (\x00)
+    # Also problematic: : (colon) on older macOS HFS+, but we'll allow it for modern systems
+    illegal_chars = descriptive_name.scan(/[\/\x00]/)
+    if illegal_chars.any?
+      chars_display = illegal_chars.uniq.map { |c| c == '/' ? 'forward slash (/)' : 'null character' }.join(', ')
+      errors.add(:descriptive_name, "contains illegal characters: #{chars_display}. These characters cannot be used in file names on macOS or Linux.")
+    end
+  end
+
   # Callback to rename file on disk when current_filename changes
   def rename_file_on_disk
     old_filename = current_filename_was
@@ -1197,36 +1242,6 @@ class Medium < ApplicationRecord
     end
     
     Rails.logger.info "=== END RENAMING FILE DUE TO DATETIME CHANGE ==="
-  end
-
-  # Compute directory based on state and associations
-  def computed_directory_path
-    require_relative '../../lib/constants'
-    case storage_state.to_s
-    when 'unsorted'
-      Constants::UNSORTED_STORAGE
-    when 'daily'
-      return nil unless has_valid_datetime?
-      dt = effective_datetime
-      File.join(Constants::DAILY_STORAGE,
-               dt.year.to_s,
-               dt.month.to_s.rjust(2, '0'),
-               dt.day.to_s.rjust(2, '0'))
-    when 'event_root'
-      return nil unless event&.folder_name
-      File.join(Constants::EVENTS_STORAGE, event.folder_name)
-    when 'subevent_level1', 'subevent_level2'
-      return nil unless event&.folder_name && subevent
-      event_dir = File.join(Constants::EVENTS_STORAGE, event.folder_name)
-      if subevent.parent_subevent_id.present?
-        parent = subevent.parent_subevent
-        File.join(event_dir, parent.footer_name, subevent.footer_name)
-      else
-        File.join(event_dir, subevent.footer_name)
-      end
-    else
-      Constants::UNSORTED_STORAGE
-    end
   end
 
   # Generate filename using effective datetime
