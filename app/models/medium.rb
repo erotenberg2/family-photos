@@ -1019,32 +1019,75 @@ class Medium < ApplicationRecord
     # Convert to symbol if it's a string
     event_name_sym = event_name.is_a?(Symbol) ? event_name : event_name.to_sym
     
+    Rails.logger.info "🔍 [analyze_transition] Medium #{id}: Analyzing transition '#{event_name_sym}'"
+    Rails.logger.info "   Current state: #{aasm.current_state}"
+    Rails.logger.info "   event_id: #{event_id}, subevent_id: #{subevent_id}"
+    Rails.logger.info "   @pending_event_id: #{@pending_event_id}, @pending_subevent_id: #{@pending_subevent_id}"
+    
     event = self.class.aasm.events.find { |e| e.name == event_name_sym }
-    return { allowed_transition: false } unless event
+    unless event
+      Rails.logger.warn "   ❌ Event '#{event_name_sym}' not found"
+      return { allowed_transition: false }
+    end
     
     current = aasm.current_state
     transition = event.transitions.find { |t| 
       t.from == current || 
       (t.from.is_a?(Array) && t.from.include?(current))
     }
-    return { allowed_transition: false } unless transition
+    unless transition
+      Rails.logger.warn "   ❌ No transition found from state '#{current}'"
+      return { allowed_transition: false }
+    end
+    
+    Rails.logger.info "   ✅ Found transition: #{current} -> #{transition.to}"
     
     # Get guards and test each one
     guards = Array(transition.options[:guard])
+    Rails.logger.info "   Guards to check: #{guards.inspect}"
+    
     guard_results = {}
+    all_guards_passed = true
+    guard_failure_reason = nil
+    
     guards.each do |guard|
       if guard.is_a?(Proc)
-        guard_results[:"proc_#{guards.index(guard)}"] = instance_exec(&guard)
+        Rails.logger.info "   🔐 Checking guard: Proc"
+        result = instance_exec(&guard)
+        guard_results[:"proc_#{guards.index(guard)}"] = result
+        Rails.logger.info "   🔐 Proc guard result: #{result}"
+        unless result
+          all_guards_passed = false
+        end
       else
-        guard_results[guard] = send(guard)
+        Rails.logger.info "   🔐 Calling guard method: #{guard}"
+        result = send(guard)
+        guard_results[guard] = result
+        Rails.logger.info "   🔐 Guard #{guard} result: #{result ? '✅ PASSED' : '❌ FAILED'}"
+        if @guard_failure_reason.present?
+          Rails.logger.info "   🔐 Guard failure reason: #{@guard_failure_reason}"
+        end
+        unless result
+          all_guards_passed = false
+          # Capture guard failure reason if available
+          guard_failure_reason ||= @guard_failure_reason if @guard_failure_reason.present?
+        end
       end
     end
     
-    { 
-      allowed_transition: true, 
+    final_result = {
+      allowed_transition: all_guards_passed, 
       guard_results: guard_results.to_a,
-      target_state: transition.to  # Add the target state
+      target_state: transition.to,  # Add the target state
+      guard_failure_reason: guard_failure_reason
     }
+    
+    Rails.logger.info "   🎯 Final result: #{all_guards_passed ? '✅ ALLOWED' : '❌ BLOCKED'}"
+    if guard_failure_reason
+      Rails.logger.info "   🎯 Failure reason: #{guard_failure_reason}"
+    end
+    
+    final_result
   end
 
 

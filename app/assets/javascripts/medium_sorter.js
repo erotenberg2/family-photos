@@ -25,6 +25,7 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
     dragStartPos: null,
     selectedMediaIds: [],
     sourceColumn: null,
+    sourceContainerInfo: null, // { event_id, subevent_id, container_type } for Events column
     destinationElement: null,
     destinationType: null,
     dragThreshold: 5 // pixels to move before drag starts
@@ -1499,10 +1500,32 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
         
         dragState.sourceColumn = column;
         
+        // Track source container info for Events column (to allow moves within Events between containers)
+        dragState.sourceContainerInfo = null;
+        if (column === 'events' && selectedItems.length > 0) {
+          // Find the container of the first selected media item
+          const firstSelectedItem = selectedItems[0];
+          const containerResult = findMediumContainer(firstSelectedItem);
+          if (containerResult && containerResult.element) {
+            const containerKey = containerResult.element.getAttribute('data-key');
+            const containerLookupKey = `${containerKey}_${column}`;
+            const containerData = treeDataByKey[containerLookupKey];
+            if (containerData && containerData.data) {
+              dragState.sourceContainerInfo = {
+                container_type: containerResult.itemType,
+                event_id: containerData.data.event_id || null,
+                subevent_id: containerData.data.subevent_id || null
+              };
+              console.log('[MediumSorter] Source container info:', dragState.sourceContainerInfo);
+            }
+          }
+        }
+        
         console.log('[MediumSorter] Drag detected:', {
           selectedMediaIds: dragState.selectedMediaIds,
           count: dragState.selectedMediaIds.length,
           sourceColumn: dragState.sourceColumn,
+          sourceContainerInfo: dragState.sourceContainerInfo,
           startPos: dragState.dragStartPos
         });
       } else {
@@ -1619,12 +1642,38 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
         const column = listbox ? listbox.getAttribute('data-column') : null;
         console.log('[MediumSorter] FIRST check: container in column:', column, 'sourceColumn:', dragState.sourceColumn);
         
-        if (column === 'events' && column !== dragState.sourceColumn) {
-          console.log('[MediumSorter] ✅ Found container - element itself is container:', itemType, {
-            dataKey: element.getAttribute('data-key'),
-            className: element.className
-          });
-          return { type: 'container', element: element, itemType: itemType };
+        // Allow Events column containers (even if same column - we'll check if it's a different container later)
+        if (column === 'events') {
+          // Check if dragging within Events and if destination is different container
+          if (column === dragState.sourceColumn && dragState.sourceContainerInfo) {
+            const containerKey = element.getAttribute('data-key');
+            const containerLookupKey = `${containerKey}_${column}`;
+            const containerData = treeDataByKey[containerLookupKey];
+            
+            if (containerData && containerData.data) {
+              const destEventId = containerData.data.event_id || null;
+              const destSubeventId = containerData.data.subevent_id || null;
+              
+              // If same container, reject it
+              if (destEventId === dragState.sourceContainerInfo.event_id &&
+                  destSubeventId === dragState.sourceContainerInfo.subevent_id) {
+                console.log('[MediumSorter] FIRST check: Same container, rejecting');
+              } else {
+                console.log('[MediumSorter] ✅ Found container - element itself is container (different):', itemType, {
+                  dataKey: element.getAttribute('data-key'),
+                  className: element.className
+                });
+                return { type: 'container', element: element, itemType: itemType };
+              }
+            }
+          } else if (column !== dragState.sourceColumn) {
+            // Different column, allow it
+            console.log('[MediumSorter] ✅ Found container - element itself is container:', itemType, {
+              dataKey: element.getAttribute('data-key'),
+              className: element.className
+            });
+            return { type: 'container', element: element, itemType: itemType };
+          }
         }
       }
     }
@@ -1655,9 +1704,31 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
           const column = listbox ? listbox.getAttribute('data-column') : null;
           console.log('[MediumSorter] Container tree-item in column:', column, 'sourceColumn:', dragState.sourceColumn);
           
-          if (column === 'events' && column !== dragState.sourceColumn) {
-            console.log('[MediumSorter] ✅ Found container when walking up from element:', itemType, 'depth:', walkDepth);
-            return { type: 'container', element: walker, itemType: itemType };
+          if (column === 'events') {
+            // Check if dragging within Events and if destination is different container
+            if (column === dragState.sourceColumn && dragState.sourceContainerInfo) {
+              const containerKey = walker.getAttribute('data-key');
+              const containerLookupKey = `${containerKey}_${column}`;
+              const containerData = treeDataByKey[containerLookupKey];
+              
+              if (containerData && containerData.data) {
+                const destEventId = containerData.data.event_id || null;
+                const destSubeventId = containerData.data.subevent_id || null;
+                
+                // If same container, reject it
+                if (destEventId === dragState.sourceContainerInfo.event_id &&
+                    destSubeventId === dragState.sourceContainerInfo.subevent_id) {
+                  console.log('[MediumSorter] Walk-up: Same container, rejecting');
+                } else {
+                  console.log('[MediumSorter] ✅ Found container when walking up from element (different):', itemType, 'depth:', walkDepth);
+                  return { type: 'container', element: walker, itemType: itemType };
+                }
+              }
+            } else if (column !== dragState.sourceColumn) {
+              // Different column, allow it
+              console.log('[MediumSorter] ✅ Found container when walking up from element:', itemType, 'depth:', walkDepth);
+              return { type: 'container', element: walker, itemType: itemType };
+            }
           }
         }
       }
@@ -1696,8 +1767,8 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
         const column = listbox ? listbox.getAttribute('data-column') : null;
         console.log('[MediumSorter] tree-root is in column:', column);
         
-        // Only check children if we're in the events column and not dragging from the same column
-        if (column === 'events' && column !== dragState.sourceColumn) {
+        // Check children if we're in the events column (even if same column - we'll check container difference later)
+        if (column === 'events') {
           // Check children to find which one is under the mouse
           const children = current.children;
           let targetChild = null;
@@ -1739,8 +1810,30 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
             console.log('[MediumSorter] Found target child in tree-root:', { itemType, tagName: targetChild.tagName });
             
             if (itemType === 'event' || itemType === 'subevent_l1' || itemType === 'subevent_l2') {
-              console.log('[MediumSorter] ✅ Destination: container from tree-root child', itemType);
-              return { type: 'container', element: targetChild, itemType: itemType };
+              // Check if dragging within Events and if destination is different container
+              if (column === dragState.sourceColumn && dragState.sourceContainerInfo) {
+                const containerKey = targetChild.getAttribute('data-key');
+                const containerLookupKey = `${containerKey}_${column}`;
+                const containerData = treeDataByKey[containerLookupKey];
+                
+                if (containerData && containerData.data) {
+                  const destEventId = containerData.data.event_id || null;
+                  const destSubeventId = containerData.data.subevent_id || null;
+                  
+                  // If same container, reject it
+                  if (destEventId === dragState.sourceContainerInfo.event_id &&
+                      destSubeventId === dragState.sourceContainerInfo.subevent_id) {
+                    console.log('[MediumSorter] tree-root child: Same container, rejecting');
+                  } else {
+                    console.log('[MediumSorter] ✅ Destination: container from tree-root child (different)', itemType);
+                    return { type: 'container', element: targetChild, itemType: itemType };
+                  }
+                }
+              } else {
+                // Different column or no source container info, allow it
+                console.log('[MediumSorter] ✅ Destination: container from tree-root child', itemType);
+                return { type: 'container', element: targetChild, itemType: itemType };
+              }
             }
           }
         }
@@ -1765,8 +1858,8 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
         const column = listbox ? listbox.getAttribute('data-column') : null;
         console.log('[MediumSorter] tree-children is in column:', column);
         
-        // Only check if we're in the events column and not dragging from the same column
-        if (column === 'events' && column !== dragState.sourceColumn) {
+        // Check if we're in the events column (even if same column - we'll check container difference later)
+        if (column === 'events') {
           // First, use mouse coordinates to find what's actually under the mouse within this tree-children
           if (mouseX !== undefined && mouseY !== undefined) {
             // Check children of this tree-children to see which one is under the mouse
@@ -1780,10 +1873,32 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
                   const itemType = child.getAttribute('data-type');
                   console.log('[MediumSorter] Mouse is over child tree-item in tree-children:', itemType);
                   
-                  // If it's a container (SL1 or SL2), return it directly
+                  // If it's a container (SL1 or SL2), check if different from source
                   if (itemType === 'subevent_l1' || itemType === 'subevent_l2') {
-                    console.log('[MediumSorter] ✅ Destination: container from tree-children child', itemType);
-                    return { type: 'container', element: child, itemType: itemType };
+                    // Check if dragging within Events and if destination is different container
+                    if (column === dragState.sourceColumn && dragState.sourceContainerInfo) {
+                      const containerKey = child.getAttribute('data-key');
+                      const containerLookupKey = `${containerKey}_${column}`;
+                      const containerData = treeDataByKey[containerLookupKey];
+                      
+                      if (containerData && containerData.data) {
+                        const destEventId = containerData.data.event_id || null;
+                        const destSubeventId = containerData.data.subevent_id || null;
+                        
+                        // If same container, reject it
+                        if (destEventId === dragState.sourceContainerInfo.event_id &&
+                            destSubeventId === dragState.sourceContainerInfo.subevent_id) {
+                          console.log('[MediumSorter] tree-children child: Same container, rejecting');
+                        } else {
+                          console.log('[MediumSorter] ✅ Destination: container from tree-children child (different)', itemType);
+                          return { type: 'container', element: child, itemType: itemType };
+                        }
+                      }
+                    } else {
+                      // Different column or no source container info, allow it
+                      console.log('[MediumSorter] ✅ Destination: container from tree-children child', itemType);
+                      return { type: 'container', element: child, itemType: itemType };
+                    }
                   }
                   // If it's a medium, find its container (but we shouldn't get here since medium handling is elsewhere)
                   break;
@@ -1801,8 +1916,30 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
               console.log('[MediumSorter] Found sibling tree-item:', { itemType, column, sourceColumn: dragState.sourceColumn });
               
               if (itemType === 'event' || itemType === 'subevent_l1' || itemType === 'subevent_l2') {
-                console.log('[MediumSorter] ✅ Destination: container from sibling', itemType);
-                return { type: 'container', element: sibling, itemType: itemType };
+                // Check if dragging within Events and if destination is different container
+                if (column === dragState.sourceColumn && dragState.sourceContainerInfo) {
+                  const containerKey = sibling.getAttribute('data-key');
+                  const containerLookupKey = `${containerKey}_${column}`;
+                  const containerData = treeDataByKey[containerLookupKey];
+                  
+                  if (containerData && containerData.data) {
+                    const destEventId = containerData.data.event_id || null;
+                    const destSubeventId = containerData.data.subevent_id || null;
+                    
+                    // If same container, reject it
+                    if (destEventId === dragState.sourceContainerInfo.event_id &&
+                        destSubeventId === dragState.sourceContainerInfo.subevent_id) {
+                      console.log('[MediumSorter] tree-children sibling: Same container, rejecting');
+                    } else {
+                      console.log('[MediumSorter] ✅ Destination: container from sibling (different)', itemType);
+                      return { type: 'container', element: sibling, itemType: itemType };
+                    }
+                  }
+                } else {
+                  // Different column or no source container info, allow it
+                  console.log('[MediumSorter] ✅ Destination: container from sibling', itemType);
+                  return { type: 'container', element: sibling, itemType: itemType };
+                }
               }
             }
             sibling = sibling.previousElementSibling;
@@ -1815,8 +1952,9 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
       if (current.classList && current.classList.contains('medium-sorter-listbox')) {
         const column = current.getAttribute('data-column');
         console.log('[MediumSorter] Found listbox:', column);
-        // Can't drag to the same column
-        if (column === dragState.sourceColumn) {
+        
+        // For unsorted or daily, can't drag to the same column
+        if ((column === 'unsorted' || column === 'daily') && column === dragState.sourceColumn) {
           console.log('[MediumSorter] Cannot drag to same column:', column);
           return null;
         }
@@ -1828,6 +1966,7 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
         }
         
         // For events, continue searching for tree-items (containers) inside
+        // Same-column is allowed for Events if it's a different container (checked later)
         // Don't return null here - continue to find tree-items
       }
       
@@ -1885,8 +2024,8 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
           treeItemDepth: treeItemDepth
         });
         
-        // Can't drag to the same column
-        if (column === dragState.sourceColumn) {
+        // Can't drag to the same column (except Events, which is checked below)
+        if (column === dragState.sourceColumn && column !== 'events') {
           console.log('[MediumSorter] Cannot drag to same column:', column);
           return null;
         }
@@ -1898,6 +2037,25 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
             console.log('[MediumSorter] Hovering over medium - finding container');
             const container = findMediumContainer(treeItem);
             if (container) {
+              // If dragging within Events column, check if destination container is different from source
+              if (column === dragState.sourceColumn && dragState.sourceContainerInfo && container.element) {
+                const containerKey = container.element.getAttribute('data-key');
+                const containerLookupKey = `${containerKey}_${column}`;
+                const containerData = treeDataByKey[containerLookupKey];
+                
+                if (containerData && containerData.data) {
+                  const destEventId = containerData.data.event_id || null;
+                  const destSubeventId = containerData.data.subevent_id || null;
+                  
+                  // Check if destination is the same container as source
+                  if (destEventId === dragState.sourceContainerInfo.event_id &&
+                      destSubeventId === dragState.sourceContainerInfo.subevent_id) {
+                    console.log('[MediumSorter] Cannot drag to same container within Events column (via medium)');
+                    return null;
+                  }
+                }
+              }
+              
               console.log('[MediumSorter] ✅ Destination: medium container', container.itemType);
               return container;
             } else {
@@ -1909,6 +2067,25 @@ console.log('[MediumSorter] medium_sorter.js file loaded');
           // CRITICAL: Return the CLOSEST container we found (not a parent)
           // We stop the search here because we want the container closest to the mouse, not its parent
           if (itemType === 'event' || itemType === 'subevent_l1' || itemType === 'subevent_l2') {
+            // If dragging within Events column, check if destination is different from source
+            if (column === dragState.sourceColumn && dragState.sourceContainerInfo) {
+              const containerKey = treeItem.getAttribute('data-key');
+              const containerLookupKey = `${containerKey}_${column}`;
+              const containerData = treeDataByKey[containerLookupKey];
+              
+              if (containerData && containerData.data) {
+                const destEventId = containerData.data.event_id || null;
+                const destSubeventId = containerData.data.subevent_id || null;
+                
+                // Check if destination is the same container as source
+                if (destEventId === dragState.sourceContainerInfo.event_id &&
+                    destSubeventId === dragState.sourceContainerInfo.subevent_id) {
+                  console.log('[MediumSorter] Cannot drag to same container within Events column');
+                  return null;
+                }
+              }
+            }
+            
             console.log('[MediumSorter] ✅ Destination: container (direct)', itemType, {
               element: treeItem.tagName,
               className: treeItem.className,

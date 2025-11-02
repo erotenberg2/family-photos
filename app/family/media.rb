@@ -716,17 +716,9 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
         else 'move_to_event'
         end
       when 'move_to_subevent_level1'
-        case current_state
-        when :unsorted, :daily, :event_root then 'move_to_subevent_level1'
-        when :subevent_level2 then 'move_subevent2_to_subevent_level1'
-        else 'move_to_subevent_level1'
-        end
+        'move_to_subevent_level1'
       when 'move_to_subevent_level2'
-        case current_state
-        when :unsorted, :daily, :event_root then 'move_to_subevent_level2'
-        when :subevent_level1 then 'move_subevent1_to_subevent_level2'
-        else 'move_to_subevent_level2'
-        end
+        'move_to_subevent_level2'
       else
         base_transition
       end
@@ -1151,25 +1143,19 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
     @validation_results = []
     
     @media.each do |medium|
+      # Set instance variables for AASM guards to check
+      medium.instance_variable_set(:@pending_event_id, @target_event_id) if @target_event_id.present?
+      medium.instance_variable_set(:@pending_subevent_id, @target_subevent_id) if @target_subevent_id.present?
+      
       # Determine the actual transition name based on current state
       transition_name = determine_transition_for_medium(medium, @batch_transition)
       result = medium.analyze_transition(transition_name)
-      
-      # Additional validation for event-related transitions
-      blocked_reason = nil
-      if @target_event && result[:allowed_transition]
-        # Check if medium is already in this event
-        if medium.event_id == @target_event.id
-          result[:allowed_transition] = false
-          blocked_reason = "Already in this event"
-        end
-      end
       
       @validation_results << {
         medium: medium,
         transition_name: transition_name,
         can_transition: result[:allowed_transition],
-        reason: blocked_reason || result[:guard_failure_reason] || result[:error]
+        reason: result[:guard_failure_reason] || result[:error]
       }
     end
     
@@ -1272,22 +1258,18 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
     errors = []
     
     media.each do |medium|
+      # Set instance variables for AASM guards to check
+      medium.instance_variable_set(:@pending_event_id, event_id) if event_id.present?
+      medium.instance_variable_set(:@pending_subevent_id, subevent_id) if subevent_id.present?
+      
       # Determine the actual transition name based on current state
       transition_name = determine_transition_for_medium(medium, batch_transition)
       result = medium.analyze_transition(transition_name)
       
-      # Skip if already in target event
-      if event_id.present? && medium.event_id.to_s == event_id.to_s
-        next
-      end
-      
+      # Trust the AASM guard - if it says the transition is not allowed, skip
       next unless result[:allowed_transition]
       
       begin
-        # Set instance variables for AASM
-        medium.instance_variable_set(:@pending_event_id, event_id) if event_id.present?
-        medium.instance_variable_set(:@pending_subevent_id, subevent_id) if subevent_id.present?
-        
         medium.send("#{transition_name}!")
         success_count += 1
       rescue => e

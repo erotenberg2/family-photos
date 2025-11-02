@@ -24,28 +24,38 @@ module MediumAasm
       # From unsorted or daily state to event_root
       event :move_to_event do
         before do
+          capture_source_path_before_move
           validate_to_events_transitions
-          perform_file_move(:event_root)
+          unless perform_file_move(:event_root)
+            raise "Failed to move file to event_root - file move operation failed"
+          end
         end
         transitions from: [:unsorted, :daily], to: :event_root, guard: :can_move_to_event?
       end
 
-      # From unsorted, daily, or event_root state to subevent_level1
+      # From unsorted, daily, event_root, or subevent_level2 state to subevent_level1
       event :move_to_subevent_level1 do
         before do
+          capture_source_path_before_move
           validate_to_events_transitions
-          perform_file_move(:subevent_level1)
+          unless perform_file_move(:subevent_level1)
+            raise "Failed to move file to subevent_level1 - file move operation failed"
+          end
         end
-        transitions from: [:unsorted, :daily, :event_root], to: :subevent_level1, guard: :can_move_to_subevent_level1?
+        transitions from: [:unsorted, :daily, :event_root, :subevent_level1, :subevent_level2], to: :subevent_level1, 
+          guard: :can_move_to_subevent_level1?
       end
 
-      # From unsorted, daily, or event_root state to subevent_level2
+      # From unsorted, daily, event_root, or subevent_level1 state to subevent_level2
       event :move_to_subevent_level2 do
         before do
+          capture_source_path_before_move
           validate_to_events_transitions
-          perform_file_move(:subevent_level2)
+          unless perform_file_move(:subevent_level2)
+            raise "Failed to move file to subevent_level2 - file move operation failed"
+          end
         end
-        transitions from: [:unsorted, :daily, :event_root], to: :subevent_level2, guard: :can_move_to_subevent_level2?
+        transitions from: [:unsorted, :daily, :event_root, :subevent_level1, :subevent_level2], to: :subevent_level2, guard: :can_move_to_subevent_level2?
       end
 
       # From daily or event_root state to unsorted
@@ -145,6 +155,14 @@ module MediumAasm
     persisted? && storage_state_changed?
   end
 
+  # Capture source file path before associations are updated
+  def capture_source_path_before_move
+    @source_path_before_move = full_file_path
+    Rails.logger.info "📁 [capture_source_path_before_move] Medium #{id}: Captured source path: #{@source_path_before_move}"
+    Rails.logger.info "   Current state: #{aasm.current_state}"
+    Rails.logger.info "   event_id: #{event_id}, subevent_id: #{subevent_id}"
+  end
+
   # Perform the actual file move based on target state
   # Returns true if successful, false otherwise
   # NOTE: This only moves the file on disk, does NOT update database
@@ -152,41 +170,72 @@ module MediumAasm
   def perform_file_move(target_state)
     require_relative '../../../lib/constants'
     
+    Rails.logger.info "📁 [perform_file_move] Medium #{id || 'new'}: Starting file move"
+    Rails.logger.info "   Current state: #{aasm.current_state}"
+    Rails.logger.info "   Target state: #{target_state}"
+    Rails.logger.info "   Current filename: #{current_filename}"
+    Rails.logger.info "   event_id: #{event_id}, subevent_id: #{subevent_id}"
+    Rails.logger.info "   @pending_event_id: #{@pending_event_id}, @pending_subevent_id: #{@pending_subevent_id}"
+    
     begin
-      Rails.logger.info "---- now moving: medium #{id} (#{current_filename})"
-      Rails.logger.info "from_state=#{aasm.current_state} target_state=#{target_state}"
-      Rails.logger.info "source_path=#{full_file_path} exists=#{full_file_path.present? && File.exist?(full_file_path)}"
+      # Use captured source path if available (captured before associations were updated)
+      # Otherwise fall back to current full_file_path (for backward compatibility)
+      source_path = @source_path_before_move || full_file_path
+      source_exists = source_path.present? && File.exist?(source_path)
+      Rails.logger.info "   Source path (captured): #{@source_path_before_move}" if @source_path_before_move
+      Rails.logger.info "   Source path (current): #{source_path}"
+      Rails.logger.info "   Source exists: #{source_exists}"
+      
       # Capture previous event context before any association changes
       @previous_event_id = event_id if instance_variable_get(:@previous_event_id).nil?
       
+      result = false
       case target_state
       when :unsorted
-        move_file_to_unsorted
+        Rails.logger.info "   📁 Moving to UNSORTED"
+        result = move_file_to_unsorted(source_path)
       when :daily
-        move_file_to_daily
+        Rails.logger.info "   📁 Moving to DAILY"
+        result = move_file_to_daily(source_path)
       when :event_root
-        if event_id.present?
-          Rails.logger.info "event_id present=#{event_id} event_folder=#{event&.folder_name}"
-          move_file_to_event
+        Rails.logger.info "   📁 Moving to EVENT_ROOT"
+        target_event_id = @pending_event_id || event_id
+        if target_event_id.present?
+          target_event = Event.find_by(id: target_event_id)
+          Rails.logger.info "   event_id present=#{target_event_id}, event_folder=#{target_event&.folder_name}"
+          result = move_file_to_event(source_path)
         else
-          Rails.logger.error "Cannot move to event - no event_id set"
-          false
+          Rails.logger.error "   ❌ Cannot move to event - no event_id set (pending: #{@pending_event_id.inspect}, current: #{event_id.inspect})"
+          result = false
         end
       when :subevent_level1, :subevent_level2
-        if subevent_id.present?
-          Rails.logger.info "subevent_id present=#{subevent_id} subevent_depth=#{subevent&.depth}"
-          move_file_to_subevent
+        Rails.logger.info "   📁 Moving to SUBEVENT (#{target_state})"
+        target_event_id = @pending_event_id || event_id
+        target_subevent_id = @pending_subevent_id || subevent_id
+        if target_subevent_id.present?
+          target_subevent = Subevent.find_by(id: target_subevent_id)
+          Rails.logger.info "   subevent_id present=#{target_subevent_id}, subevent_title=#{target_subevent&.title}"
+          Rails.logger.info "   subevent_depth=#{target_subevent&.depth}, parent_subevent_id=#{target_subevent&.parent_subevent_id}"
+          result = move_file_to_subevent(source_path)
         else
-          Rails.logger.error "Cannot move to subevent - no subevent_id set"
-          false
+          Rails.logger.error "   ❌ Cannot move to subevent - no subevent_id set (pending: #{@pending_subevent_id.inspect}, current: #{subevent_id.inspect})"
+          result = false
         end
       else
-        Rails.logger.warn "Unknown target state: #{target_state}"
-        false
+        Rails.logger.warn "   ❌ Unknown target state: #{target_state}"
+        result = false
       end
+      
+      Rails.logger.info "   📁 [perform_file_move] Result: #{result ? '✅ SUCCESS' : '❌ FAILED'}"
+      # Clear captured source path after use
+      @source_path_before_move = nil
+      result
     rescue => e
-      Rails.logger.error "File move failed: #{e.message}"
-      Rails.logger.error e.backtrace.join("\n")
+      Rails.logger.error "   ❌ [perform_file_move] Exception: #{e.class} - #{e.message}"
+      Rails.logger.error "   Backtrace:"
+      e.backtrace.first(10).each { |line| Rails.logger.error "      #{line}" }
+      # Clear captured source path even on error
+      @source_path_before_move = nil
       false
     end
   end
@@ -307,72 +356,199 @@ module MediumAasm
   end
   
   # Move file to event root (only moves file, doesn't update DB)
-  def move_file_to_event
-    source_path = full_file_path
-    old_dir = File.dirname(source_path) if source_path && File.exist?(source_path)
-    event_dir = File.join(Constants::EVENTS_STORAGE, event.folder_name)
+  def move_file_to_event(source_path = nil)
+    Rails.logger.info "📁 [move_file_to_event] Medium #{id}: Starting event move"
+    
+    # Use instance variable to get destination - association not set yet
+    target_event_id = @pending_event_id || event_id
+    
+    unless target_event_id.present?
+      Rails.logger.error "   ❌ target_event_id is nil"
+      return false
+    end
+    
+    # Load event directly using ID (association not set yet)
+    target_event = Event.find_by(id: target_event_id)
+    
+    unless target_event.present?
+      Rails.logger.error "   ❌ Event (id: #{target_event_id}) not found"
+      return false
+    end
+    
+    Rails.logger.info "   Event: #{target_event.title} (id: #{target_event.id}, folder: #{target_event.folder_name})"
+    
+    # Use provided source_path or fall back to current full_file_path
+    source_path ||= full_file_path
+    source_exists = source_path.present? && File.exist?(source_path)
+    Rails.logger.info "   Source path: #{source_path}"
+    Rails.logger.info "   Source exists: #{source_exists}"
+    
+    old_dir = File.dirname(source_path) if source_path && source_exists
+    
+    event_dir = File.join(Constants::EVENTS_STORAGE, target_event.folder_name)
+    Rails.logger.info "   Event dir: #{event_dir}"
+    Rails.logger.info "   Events storage root: #{Constants::EVENTS_STORAGE}"
+    
     new_path = File.join(event_dir, current_filename)
+    Rails.logger.info "   Destination path: #{new_path}"
     
-    FileUtils.mkdir_p(event_dir) unless Dir.exist?(event_dir)
-    
-    Rails.logger.info "event: dest_dir=#{event_dir} dest_path=#{new_path}"
-    if File.exist?(source_path) && source_path != new_path
-      Rails.logger.info "event: moving #{source_path} -> #{new_path}"
-      FileUtils.mv(source_path, new_path)
-      # Update in-memory attributes (will be saved by AASM)
-      Rails.logger.info "✅ Moved file to: #{new_path}"
-      
-      # Clean up empty directories in source location
-      cleanup_empty_directories(old_dir)
-      true
+    # Check if directory exists, create if not
+    if Dir.exist?(event_dir)
+      Rails.logger.info "   ✅ Event directory already exists"
     else
-      unless File.exist?(source_path)
-        Rails.logger.error "❌ move_file_to_event: source file missing: #{source_path}"
+      Rails.logger.info "   📂 Creating event directory: #{event_dir}"
+      FileUtils.mkdir_p(event_dir)
+      Rails.logger.info "   ✅ Created event directory"
+    end
+    
+    if source_exists && source_path != new_path
+      Rails.logger.info "   📦 Moving file: #{source_path} -> #{new_path}"
+      begin
+        FileUtils.mv(source_path, new_path)
+        Rails.logger.info "   ✅ File moved successfully"
+        
+        # Update in-memory attributes (will be saved by AASM)
+        Rails.logger.info "   ✅ Moved file to: #{new_path}"
+        
+        # Clean up empty directories in source location
+        cleanup_empty_directories(old_dir)
+        true
+      rescue => e
+        Rails.logger.error "   ❌ FileUtils.mv failed: #{e.class} - #{e.message}"
+        Rails.logger.error "   Source: #{source_path}"
+        Rails.logger.error "   Destination: #{new_path}"
+        false
+      end
+    else
+      unless source_exists
+        Rails.logger.error "   ❌ Source file missing: #{source_path}"
         return false
       end
-      Rails.logger.info "event: already at destination #{new_path}"
-      # Already at destination
-      true
+      if source_path == new_path
+        Rails.logger.info "   ✅ Already at destination: #{new_path}"
+        true
+      else
+        Rails.logger.warn "   ⚠️ Source exists but paths don't match. Source: #{source_path}, Dest: #{new_path}"
+        false
+      end
     end
   end
   
   # Move file to subevent (only moves file, doesn't update DB)
-  def move_file_to_subevent
-    source_path = full_file_path
-    old_dir = File.dirname(source_path) if source_path && File.exist?(source_path)
-    event_dir = File.join(Constants::EVENTS_STORAGE, event.folder_name)
+  def move_file_to_subevent(source_path = nil)
+    Rails.logger.info "📁 [move_file_to_subevent] Medium #{id}: Starting subevent move"
     
-    if subevent.parent_subevent_id.present?
-      # Level 2 subevent
-      parent = subevent.parent_subevent
-      subevent_dir = File.join(event_dir, parent.footer_name, subevent.footer_name)
-    else
-      # Level 1 subevent
-      subevent_dir = File.join(event_dir, subevent.footer_name)
+    # Use instance variables to get destination - associations not set yet
+    target_event_id = @pending_event_id || event_id
+    target_subevent_id = @pending_subevent_id || subevent_id
+    
+    unless target_event_id.present?
+      Rails.logger.error "   ❌ target_event_id is nil"
+      return false
     end
     
-    new_path = File.join(subevent_dir, current_filename)
+    unless target_subevent_id.present?
+      Rails.logger.error "   ❌ target_subevent_id is nil"
+      return false
+    end
     
-    FileUtils.mkdir_p(subevent_dir) unless Dir.exist?(subevent_dir)
+    # Load event and subevent directly using IDs (associations not set yet)
+    target_event = Event.find_by(id: target_event_id)
+    target_subevent = Subevent.find_by(id: target_subevent_id)
     
-    Rails.logger.info "subevent: dest_dir=#{subevent_dir} dest_path=#{new_path}"
-    if File.exist?(source_path) && source_path != new_path
-      Rails.logger.info "subevent: moving #{source_path} -> #{new_path}"
-      FileUtils.mv(source_path, new_path)
-      # Update in-memory attributes (will be saved by AASM)
-      Rails.logger.info "✅ Moved file to: #{new_path}"
-      
-      # Clean up empty directories in source location
-      cleanup_empty_directories(old_dir)
-      true
-    else
-      unless File.exist?(source_path)
-        Rails.logger.error "❌ move_file_to_subevent: source file missing: #{source_path}"
-        return false
+    unless target_event.present?
+      Rails.logger.error "   ❌ Event (id: #{target_event_id}) not found"
+      return false
+    end
+    
+    unless target_subevent.present?
+      Rails.logger.error "   ❌ Subevent (id: #{target_subevent_id}) not found"
+      return false
+    end
+    
+    Rails.logger.info "   Event: #{target_event.title} (id: #{target_event.id}, folder: #{target_event.folder_name})"
+    Rails.logger.info "   Subevent: #{target_subevent.title} (id: #{target_subevent.id})"
+    Rails.logger.info "   Subevent parent_subevent_id: #{target_subevent.parent_subevent_id}"
+    
+    # Use provided source_path or fall back to current full_file_path
+    source_path ||= full_file_path
+    source_exists = source_path.present? && File.exist?(source_path)
+    Rails.logger.info "   Source path: #{source_path}"
+    Rails.logger.info "   Source exists: #{source_exists}"
+    
+    old_dir = File.dirname(source_path) if source_path && source_exists
+    
+    event_dir = File.join(Constants::EVENTS_STORAGE, target_event.folder_name)
+    Rails.logger.info "   Event dir: #{event_dir}"
+    Rails.logger.info "   Events storage root: #{Constants::EVENTS_STORAGE}"
+    
+    begin
+      if target_subevent.parent_subevent_id.present?
+        # Level 2 subevent
+        parent = target_subevent.parent_subevent
+        unless parent.present?
+          Rails.logger.error "   ❌ Parent subevent (id: #{target_subevent.parent_subevent_id}) not found"
+          return false
+        end
+        Rails.logger.info "   Level 2 subevent detected"
+        Rails.logger.info "   Parent subevent: #{parent.title} (id: #{parent.id}, folder: #{parent.footer_name})"
+        subevent_dir = File.join(event_dir, parent.footer_name, target_subevent.footer_name)
+      else
+        # Level 1 subevent
+        Rails.logger.info "   Level 1 subevent detected"
+        subevent_dir = File.join(event_dir, target_subevent.footer_name)
       end
-      Rails.logger.info "subevent: already at destination #{new_path}"
-      # Already at destination
-      true
+      
+      Rails.logger.info "   Subevent dir: #{subevent_dir}"
+      
+      new_path = File.join(subevent_dir, current_filename)
+      Rails.logger.info "   Destination path: #{new_path}"
+      
+      # Check if directory exists, create if not
+      if Dir.exist?(subevent_dir)
+        Rails.logger.info "   ✅ Subevent directory already exists"
+      else
+        Rails.logger.info "   📂 Creating subevent directory: #{subevent_dir}"
+        FileUtils.mkdir_p(subevent_dir)
+        Rails.logger.info "   ✅ Created subevent directory"
+      end
+      
+      if source_exists && source_path != new_path
+        Rails.logger.info "   📦 Moving file: #{source_path} -> #{new_path}"
+        begin
+          FileUtils.mv(source_path, new_path)
+          Rails.logger.info "   ✅ File moved successfully"
+          
+          # Update in-memory attributes (will be saved by AASM)
+          Rails.logger.info "   ✅ Moved file to: #{new_path}"
+          
+          # Clean up empty directories in source location
+          cleanup_empty_directories(old_dir)
+          true
+        rescue => e
+          Rails.logger.error "   ❌ FileUtils.mv failed: #{e.class} - #{e.message}"
+          Rails.logger.error "   Source: #{source_path}"
+          Rails.logger.error "   Destination: #{new_path}"
+          false
+        end
+      else
+        unless source_exists
+          Rails.logger.error "   ❌ Source file missing: #{source_path}"
+          return false
+        end
+        if source_path == new_path
+          Rails.logger.info "   ✅ Already at destination: #{new_path}"
+          true
+        else
+          Rails.logger.warn "   ⚠️ Source exists but paths don't match. Source: #{source_path}, Dest: #{new_path}"
+          false
+        end
+      end
+    rescue => e
+      Rails.logger.error "   ❌ [move_file_to_subevent] Exception: #{e.class} - #{e.message}"
+      Rails.logger.error "   Backtrace:"
+      e.backtrace.first(10).each { |line| Rails.logger.error "      #{line}" }
+      false
     end
   end
   
@@ -410,6 +586,7 @@ module MediumAasm
     
     # Validate that required IDs are set before transitioning
     # Use @pending_event_id and @pending_subevent_id if set (passed via instance variables)
+    # Do NOT update self.event_id or self.subevent_id here - that happens in after callback
     event_id_to_use = @pending_event_id || event_id
     subevent_id_to_use = @pending_subevent_id || subevent_id
     
@@ -423,26 +600,17 @@ module MediumAasm
       unless Event.exists?(id: event_id_to_use)
         raise "Cannot transition to event_root state: event #{event_id_to_use} does not exist"
       end
-      # Set the event_id now that we've validated it
-      self.event_id = event_id_to_use
-      Rails.logger.info "After setting event_id, self.event_id: #{self.event_id.inspect}"
+      Rails.logger.info "Validation passed - event exists. Will set event_id in after callback."
     elsif subevent_id_to_use.present?
       subevent = Subevent.find_by(id: subevent_id_to_use)
       unless subevent
         raise "Cannot transition to subevent state: subevent #{subevent_id_to_use} does not exist"
       end
-      # Set the subevent_id and event_id now that we've validated them
-      self.subevent_id = subevent_id_to_use
-      self.event_id = subevent.event_id if event_id.blank?
-      Rails.logger.info "Set subevent_id: #{subevent_id_to_use} (depth: #{subevent.depth}), event_id: #{subevent.event_id}"
+      Rails.logger.info "Validation passed - subevent exists (depth: #{subevent.depth}), event_id: #{subevent.event_id}"
+      Rails.logger.info "Will set subevent_id and event_id in after callback."
     else
       Rails.logger.info "No case matched - event_id_to_use: #{event_id_to_use.inspect}, subevent_id_to_use: #{subevent_id_to_use.inspect}"
     end
-    # Clear instance variables after use
-    Rails.logger.info "At end of validate_to_events_transitions, event_id: #{event_id.inspect}"
-    Rails.logger.info "At end of validate_to_events_transitions, subevent_id: #{subevent_id.inspect}"
-    @pending_event_id = nil
-    @pending_subevent_id = nil
     Rails.logger.info "=== END VALIDATE TO EVENTS TRANSITIONS ==="
   end
 
@@ -505,17 +673,52 @@ module MediumAasm
   end
 
   def update_associations
+    Rails.logger.info "=== UPDATE ASSOCIATIONS ==="
+    Rails.logger.info "@pending_event_id: #{@pending_event_id.inspect}"
+    Rails.logger.info "@pending_subevent_id: #{@pending_subevent_id.inspect}"
+    Rails.logger.info "aasm.to_state: #{aasm.to_state}"
+    
     # Update event and subevent associations based on state
+    # Use @pending_event_id and @pending_subevent_id if available (from before callback)
     case aasm.to_state
     when :unsorted, :daily
       self.event = nil
       self.subevent = nil
+      Rails.logger.info "Set associations to nil for #{aasm.to_state}"
     when :event_root
-      # event should already be set before transition
+      # Set event_id from instance variable if available
+      if @pending_event_id.present?
+        self.event_id = @pending_event_id
+        Rails.logger.info "Set event_id to #{@pending_event_id} from @pending_event_id"
+      end
       self.subevent = nil
+      Rails.logger.info "Set subevent to nil for event_root"
     when :subevent_level1, :subevent_level2
-      # both event and subevent should be set before transition
+      # Set subevent_id and event_id from instance variables if available
+      if @pending_subevent_id.present?
+        self.subevent_id = @pending_subevent_id
+        Rails.logger.info "Set subevent_id to #{@pending_subevent_id} from @pending_subevent_id"
+        
+        # Get event_id from subevent if not already set
+        if subevent.present? && (event_id.blank? || @pending_event_id.present?)
+          target_event_id = @pending_event_id || subevent.event_id
+          if target_event_id.present?
+            self.event_id = target_event_id
+            Rails.logger.info "Set event_id to #{target_event_id} from subevent"
+          end
+        end
+      elsif @pending_event_id.present?
+        # Just setting event_id
+        self.event_id = @pending_event_id
+        Rails.logger.info "Set event_id to #{@pending_event_id} from @pending_event_id"
+      end
+      Rails.logger.info "Final associations: event_id=#{event_id}, subevent_id=#{subevent_id}"
     end
+    
+    # Clear instance variables after use
+    @pending_event_id = nil
+    @pending_subevent_id = nil
+    Rails.logger.info "=== END UPDATE ASSOCIATIONS ==="
   end
 
   # After a transition, recompute event date ranges and ensure folder names match
@@ -560,40 +763,111 @@ module MediumAasm
   end
 
   def can_move_to_event?
-    # Check if there are any events available to move to
-    if Event.count == 0
-      Rails.logger.warn "AASM Guard: Cannot move to event - no events exist"
-      @guard_failure_reason = "no events available"
+    target_event_id = @pending_event_id || event_id
+    
+    # Safety check: target event must exist
+    if target_event_id.present?
+      unless Event.exists?(id: target_event_id)
+        Rails.logger.warn "AASM Guard: Cannot move to event - target event #{target_event_id} does not exist"
+        @guard_failure_reason = "target event does not exist"
+        return false
+      end
+    else
+      # No target event specified
+      Rails.logger.warn "AASM Guard: Cannot move to event - no target event specified"
+      @guard_failure_reason = "no target event specified"
       return false
     end
     
-    Rails.logger.debug "AASM Guard: Can move to event - events exist"
+    # Check that destination is different from source
+    # If source is in event tree, check that we're moving to a different event
+    if event_id.present?
+      if event_id == target_event_id && subevent_id.blank?
+        Rails.logger.warn "AASM Guard: Cannot move to event - already in event #{target_event_id}"
+        @guard_failure_reason = "already in this event"
+        return false
+      end
+    end
+    
+    Rails.logger.debug "AASM Guard: Can move to event #{target_event_id}"
     true
   end
 
-  def can_move_to_subevent_level1?
-    # Check if there are any level 1 subevents available to move to (top-level subevents have depth 1)
-    # We need to check if any subevents have no parent (depth 1)
-    if Subevent.top_level.count == 0
-      Rails.logger.warn "AASM Guard: Cannot move to subevent level 1 - no top-level subevents exist"
-      @guard_failure_reason = "no level 1 subevents available"
+  # Consolidated guard for moving to any subevent (SL1 or SL2)
+  # The only difference is validating the target subevent's level matches the target state
+  def can_move_to_subevent?(expected_level: nil)
+    Rails.logger.info "🛡️ [can_move_to_subevent] Medium #{id || 'new'}: Starting guard check"
+    Rails.logger.info "   Expected level: #{expected_level.inspect}"
+    Rails.logger.info "   Current state: #{aasm.current_state}"
+    Rails.logger.info "   Current event_id: #{event_id}, subevent_id: #{subevent_id}"
+    Rails.logger.info "   @pending_event_id: #{@pending_event_id}, @pending_subevent_id: #{@pending_subevent_id}"
+    
+    target_subevent_id = @pending_subevent_id || subevent_id
+    target_event_id = @pending_event_id || event_id
+    
+    Rails.logger.info "   Target subevent_id: #{target_subevent_id}, target_event_id: #{target_event_id}"
+    
+    # Safety check: target subevent must exist
+    if target_subevent_id.present?
+      target_subevent = Subevent.find_by(id: target_subevent_id)
+      unless target_subevent
+        Rails.logger.warn "   ❌ AASM Guard: Cannot move to subevent - target subevent #{target_subevent_id} does not exist"
+        @guard_failure_reason = "target subevent does not exist"
+        return false
+      end
+      
+      Rails.logger.info "   ✅ Target subevent found: #{target_subevent.title} (id: #{target_subevent_id})"
+      Rails.logger.info "   Target subevent event_id: #{target_subevent.event_id}, parent_subevent_id: #{target_subevent.parent_subevent_id}"
+      
+      # Safety check: validate level if expected_level is specified
+      if expected_level.present?
+        is_level2 = target_subevent.parent_subevent_id.present?
+        Rails.logger.info "   Checking level: expected=#{expected_level}, actual=#{is_level2 ? 'level2' : 'level1'}"
+        if expected_level == :level1 && is_level2
+          Rails.logger.warn "   ❌ AASM Guard: Cannot move to subevent level 1 - target subevent #{target_subevent_id} is level 2 (has parent)"
+          @guard_failure_reason = "target subevent is not level 1"
+          return false
+        elsif expected_level == :level2 && !is_level2
+          Rails.logger.warn "   ❌ AASM Guard: Cannot move to subevent level 2 - target subevent #{target_subevent_id} is level 1 (no parent)"
+          @guard_failure_reason = "target subevent is not level 2"
+          return false
+        end
+        Rails.logger.info "   ✅ Level check passed"
+      end
+    else
+      Rails.logger.warn "   ❌ AASM Guard: Cannot move to subevent - no target subevent specified"
+      @guard_failure_reason = "no target subevent specified"
       return false
     end
     
-    Rails.logger.debug "AASM Guard: Can move to subevent level 1 - top-level subevents exist"
+    # Check that destination is different from source
+    # If source is in event tree (not daily/unsorted), check that destination differs
+    if event_id.present? || subevent_id.present?
+      source_event_id = event_id || (subevent_id.present? ? Subevent.find_by(id: subevent_id)&.event_id : nil)
+      Rails.logger.info "   Checking differentiation: source_event_id=#{source_event_id}, target_event_id=#{target_event_id}"
+      Rails.logger.info "   source_subevent_id=#{subevent_id}, target_subevent_id=#{target_subevent_id}"
+      if source_event_id == target_event_id && subevent_id == target_subevent_id
+        Rails.logger.warn "   ❌ AASM Guard: Cannot move to subevent - already in subevent #{target_subevent_id}"
+        @guard_failure_reason = "already in this subevent"
+        return false
+      end
+      Rails.logger.info "   ✅ Differentiation check passed - destination differs from source"
+    else
+      Rails.logger.info "   ✅ Source is daily/unsorted - destination check not needed"
+    end
+    
+    Rails.logger.info "   ✅ AASM Guard: Can move to subevent - target subevent #{target_subevent_id} is valid"
     true
+  end
+
+  # Wrapper methods for backwards compatibility with AASM guard references
+  def can_move_to_subevent_level1?
+    Rails.logger.info "🛡️ [can_move_to_subevent_level1] Medium #{id || 'new'}: Wrapper called"
+    can_move_to_subevent?(expected_level: :level1)
   end
 
   def can_move_to_subevent_level2?
-    # Check if there are any level 2 subevents available to move to (subevents with a parent have depth 2)
-    # We need to check if any subevents have a parent (depth >= 2)
-    if Subevent.where.not(parent_subevent_id: nil).count == 0
-      Rails.logger.warn "AASM Guard: Cannot move to subevent level 2 - no level 2 subevents exist"
-      @guard_failure_reason = "no level 2 subevents available"
-      return false
-    end
-    
-    Rails.logger.debug "AASM Guard: Can move to subevent level 2 - level 2 subevents exist"
-    true
+    Rails.logger.info "🛡️ [can_move_to_subevent_level2] Medium #{id || 'new'}: Wrapper called"
+    can_move_to_subevent?(expected_level: :level2)
   end
 end

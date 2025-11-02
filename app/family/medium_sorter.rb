@@ -30,12 +30,9 @@ ActiveAdmin.register_page "MediumSorter", namespace: :family do
     # Build data for event hierarchy media
     event_media = Medium.where(storage_state: [:event_root, :subevent_level1, :subevent_level2])
                         .includes(:event, :subevent, :user, :uploaded_by)
-    # Get all events that have media or have subevents (even if empty)
-    event_ids_from_media = event_media.map(&:event_id).compact.uniq
-    event_ids_with_subevents = Event.joins(:subevents).distinct.pluck(:id)
-    all_event_ids = (event_ids_from_media + event_ids_with_subevents).uniq
-    all_events_with_subevents = Event.where(id: all_event_ids).includes(:subevents)
-    event_data = build_event_hierarchy(event_media, all_events_with_subevents)
+    # Get ALL events (including empty ones with no media and no subevents)
+    all_events = Event.includes(:subevents).order(:title)
+    event_data = build_event_hierarchy(event_media, all_events)
 
     render json: {
       unsorted: unsorted_data,
