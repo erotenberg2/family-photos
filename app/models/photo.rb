@@ -36,7 +36,7 @@ class Photo < ApplicationRecord
   validates :latitude, :longitude, numericality: true, allow_nil: true
   
   # Delegate generic media attributes to Medium
-  delegate :file_path, :file_size, :original_filename, :content_type, :md5_hash,
+  delegate :file_path, :file_size, :original_filename, :current_filename, :content_type, :md5_hash,
            :uploaded_by, :user, :file_size_human, :effective_datetime,
            :has_valid_datetime?, :datetime_source, :taken_date, :file_exists?, to: :medium, allow_nil: true
            

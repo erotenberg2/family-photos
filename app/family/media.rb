@@ -35,7 +35,17 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
         when 'audio'
           content_tag :div, Constants::AUDIO_ICON, style: "width: 60px; height: 60px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; font-size: 24px; border-radius: 4px; cursor: pointer;"
         when 'video'
-          content_tag :div, Constants::VIDEO_ICON, style: "width: 60px; height: 60px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; font-size: 24px; border-radius: 4px; cursor: pointer;"
+          if medium.mediable&.thumbnail_path && File.exist?(medium.mediable.thumbnail_path)
+            # Use video thumbnail
+            image_tag("data:image/jpg;base64,#{Base64.encode64(File.read(medium.mediable.thumbnail_path))}", 
+                      style: "max-width: 60px; max-height: 60px; object-fit: cover; border-radius: 4px; cursor: pointer; transition: transform 0.2s ease; display: block;",
+                      alt: medium.mediable&.title || medium.original_filename,
+                      onmouseover: "this.style.transform='scale(1.05)'",
+                      onmouseout: "this.style.transform='scale(1)'")
+          else
+            # Show placeholder for unprocessed videos
+            content_tag :div, Constants::VIDEO_ICON, style: "width: 60px; height: 60px; background: #f8f9fa; display: flex; align-items: center; justify-content: center; font-size: 24px; border-radius: 4px; cursor: pointer; border: 2px dashed #dee2e6;"
+          end
         else
           content_tag :div, Constants::FILE_ICON, style: "width: 60px; height: 60px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; font-size: 24px; border-radius: 4px; cursor: pointer;"
         end
@@ -1067,6 +1077,8 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
     session[:batch_transition] = transition_type.to_sym
     session[:batch_target_event_id] = target_event_id if target_event_id
     session[:batch_target_subevent_id] = target_subevent_id if target_subevent_id
+    # Flag to indicate this came from medium_sorter page
+    session[:from_medium_sorter] = true
     
     # Redirect to existing validation page
     redirect_to batch_validate_transition_family_media_path
@@ -1180,12 +1192,17 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
     session.delete(:batch_media_ids)
     session.delete(:batch_transition)
     
+    # Determine redirect path - back to medium_sorter if that's where we came from
+    from_sorter = session[:from_medium_sorter]
+    session.delete(:from_medium_sorter)
+    redirect_path = from_sorter ? family_mediumsorter_path : collection_path
+    
     if error_count == 0
-      redirect_to collection_path, notice: "Successfully moved #{success_count} media files"
+      redirect_to redirect_path, notice: "Successfully moved #{success_count} media files"
     elsif success_count > 0
-      redirect_to collection_path, alert: "Moved #{success_count} files, but #{error_count} failed: #{errors.first(3).join('; ')}"
+      redirect_to redirect_path, alert: "Moved #{success_count} files, but #{error_count} failed: #{errors.first(3).join('; ')}"
     else
-      redirect_to collection_path, alert: "Failed to move files: #{errors.first(3).join('; ')}"
+      redirect_to redirect_path, alert: "Failed to move files: #{errors.first(3).join('; ')}"
     end
   end
   
@@ -1255,12 +1272,15 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
     session.delete(:batch_target_event_id)
     session.delete(:batch_target_subevent_id)
     
-    if error_count == 0 && event_id.present?
-      redirect_to family_event_path(event_id), notice: "Successfully moved #{success_count} media files"
-    elsif error_count == 0
-      redirect_to collection_path, notice: "Successfully moved #{success_count} media files"
+    # Determine redirect path - back to medium_sorter if that's where we came from
+    from_sorter = session[:from_medium_sorter]
+    session.delete(:from_medium_sorter)
+    redirect_path = from_sorter ? family_mediumsorter_path : (event_id.present? ? family_event_path(event_id) : collection_path)
+    
+    if error_count == 0
+      redirect_to redirect_path, notice: "Successfully moved #{success_count} media files"
     else
-      redirect_to collection_path, alert: "Moved #{success_count} files, but #{error_count} failed"
+      redirect_to redirect_path, alert: "Moved #{success_count} files, but #{error_count} failed"
     end
   end
 

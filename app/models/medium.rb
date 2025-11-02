@@ -29,11 +29,23 @@ class Medium < ApplicationRecord
     in: ->(medium) { 
       case medium.medium_type
       when 'photo'
-        %w[image/jpeg image/jpg image/png image/gif image/bmp image/tiff image/heic image/heif]
+        if defined?(Photo) && Photo.respond_to?(:valid_types)
+          Photo.valid_types.keys
+        else
+          %w[image/jpeg image/jpg image/png image/gif image/bmp image/tiff image/heic image/heif image/webp]
+        end
       when 'audio'
-        %w[audio/mpeg audio/mp3 audio/wav audio/aac audio/ogg audio/flac]
+        if defined?(Audio) && Audio.respond_to?(:valid_types)
+          Audio.valid_types.keys
+        else
+          %w[audio/mpeg audio/mp3 audio/wav audio/aac audio/ogg audio/flac]
+        end
       when 'video'
-        %w[video/mp4 video/mov video/avi video/mkv video/webm]
+        if defined?(Video) && Video.respond_to?(:valid_types)
+          Video.valid_types.keys
+        else
+          %w[video/mp4 video/mov video/avi video/mkv video/webm]
+        end
       else
         []
       end
@@ -47,6 +59,8 @@ class Medium < ApplicationRecord
   # Callbacks for file operations
   before_update :rename_file_on_disk, if: :current_filename_changed?
   after_update :rename_file_if_datetime_changed, if: :effective_datetime_changed?
+  before_destroy :store_mediable_info
+  after_destroy :cleanup_thumbnails_and_previews
   
   # Scopes
   scope :by_date, -> { order(:datetime_user, :datetime_intrinsic, :datetime_inferred, :created_at) }
@@ -608,8 +622,15 @@ class Medium < ApplicationRecord
       return 'photo' if Photo.valid_types.key?(content_type)
     end
     
-    # TODO: Add audio and video checks when those models exist
-    # For now, we only support photos
+    # Check against Audio valid types
+    if defined?(Audio) && Audio.respond_to?(:valid_types)
+      return 'audio' if Audio.valid_types.key?(content_type)
+    end
+    
+    # Check against Video valid types
+    if defined?(Video) && Video.respond_to?(:valid_types)
+      return 'video' if Video.valid_types.key?(content_type)
+    end
     
     nil
   end
@@ -631,8 +652,25 @@ class Medium < ApplicationRecord
       end
     end
     
-    # TODO: Add audio and video when those models are created
-    # For now, we'll reject audio/video files to prevent errors
+    # Add audio types
+    if allowed_types.include?('all') || allowed_types.include?('audio')
+      if defined?(Audio) && Audio.respond_to?(:valid_types)
+        Audio.valid_types.each do |mime_type, extensions|
+          acceptable_types[mime_type] = 'audio'
+          extensions.each { |ext| valid_extensions[ext] = 'audio' }
+        end
+      end
+    end
+    
+    # Add video types
+    if allowed_types.include?('all') || allowed_types.include?('video')
+      if defined?(Video) && Video.respond_to?(:valid_types)
+        Video.valid_types.each do |mime_type, extensions|
+          acceptable_types[mime_type] = 'video'
+          extensions.each { |ext| valid_extensions[ext] = 'video' }
+        end
+      end
+    end
     
     # Filter files and return with their determined types
     files.filter_map do |file|
@@ -699,11 +737,21 @@ class Medium < ApplicationRecord
         height: height
       )
     when 'audio'
-      # Audio.create(...) when we add Audio model
-      nil # For now
+      # Create audio record with minimal data
+      Audio.create(
+        title: File.basename(uploaded_file.original_filename, '.*').humanize,
+        description: nil
+      )
     when 'video'
-      # Video.create(...) when we add Video model  
-      nil # For now
+      # Extract dimensions for videos (minimal data for now)
+      width, height = extract_dimensions(file_path, uploaded_file.content_type)
+      
+      Video.create(
+        title: File.basename(uploaded_file.original_filename, '.*').humanize,
+        description: nil,
+        width: width,
+        height: height
+      )
     end
   end
 
@@ -767,9 +815,13 @@ class Medium < ApplicationRecord
       
       if datetime_intrinsic.present?
         medium.update_columns(datetime_intrinsic: datetime_intrinsic)
+        # Rename file to use proper datetime-based filename
+        rename_file_to_datetime_based_name(medium, datetime_intrinsic)
       else
         datetime_inferred = medium.created_at
         medium.update_columns(datetime_inferred: datetime_inferred)
+        # Rename file to use inferred datetime
+        rename_file_to_datetime_based_name(medium, datetime_inferred)
       end
     when 'video'
       # Extract video metadata when we add video support
@@ -777,10 +829,17 @@ class Medium < ApplicationRecord
       
       if datetime_intrinsic.present?
         medium.update_columns(datetime_intrinsic: datetime_intrinsic)
+        # Rename file to use proper datetime-based filename
+        rename_file_to_datetime_based_name(medium, datetime_intrinsic)
       else
         datetime_inferred = medium.created_at
         medium.update_columns(datetime_inferred: datetime_inferred)
+        # Rename file to use inferred datetime
+        rename_file_to_datetime_based_name(medium, datetime_inferred)
       end
+      
+      # Generate video thumbnail and preview
+      medium.mediable.generate_thumbnail if medium.mediable&.respond_to?(:generate_thumbnail)
     end
     
     Rails.logger.info "Post-processing completed for: #{medium.original_filename}"
@@ -900,12 +959,23 @@ class Medium < ApplicationRecord
     Rails.logger.info "=== CLEANING UP ORPHANED THUMBNAILS AND PREVIEWS ==="
     
     # Get all thumbnail and preview paths from database that are in the NEW storage locations
+    # Include both Photo and Video models
     thumbnail_paths = Photo.where.not(thumbnail_path: nil)
                           .where("thumbnail_path LIKE ?", "#{Constants::THUMBNAILS_STORAGE}%")
                           .pluck(:thumbnail_path).compact.to_set
     preview_paths = Photo.where.not(preview_path: nil)
                         .where("preview_path LIKE ?", "#{Constants::PREVIEWS_STORAGE}%")
                         .pluck(:preview_path).compact.to_set
+    
+    # Add Video thumbnails and previews if Video is defined
+    if defined?(Video)
+      thumbnail_paths.merge(Video.where.not(thumbnail_path: nil)
+                                .where("thumbnail_path LIKE ?", "#{Constants::THUMBNAILS_STORAGE}%")
+                                .pluck(:thumbnail_path).compact)
+      preview_paths.merge(Video.where.not(preview_path: nil)
+                              .where("preview_path LIKE ?", "#{Constants::PREVIEWS_STORAGE}%")
+                              .pluck(:preview_path).compact)
+    end
     
     Rails.logger.info "Found #{thumbnail_paths.size} thumbnails and #{preview_paths.size} previews in database using NEW storage locations"
     
@@ -1338,6 +1408,55 @@ class Medium < ApplicationRecord
           Rails.logger.info "✅ Renamed preview: #{old_preview_path} -> #{new_preview_path}"
         rescue => e
           Rails.logger.error "❌ Failed to rename preview: #{e.message}"
+        end
+      end
+    end
+  end
+
+  # Store mediable info before destroy for cleanup
+  def store_mediable_info
+    @stored_mediable_id = mediable_id
+    @stored_mediable_type = mediable_type
+  end
+
+  # Cleanup thumbnails and previews when medium is destroyed
+  def cleanup_thumbnails_and_previews
+    return unless @stored_mediable_type.present?
+    
+    # Handle Photo
+    if @stored_mediable_type == 'Photo' && defined?(Photo)
+      if @stored_mediable_id.present?
+        photo = Photo.find_by(id: @stored_mediable_id)
+        if photo
+          [photo.thumbnail_path, photo.preview_path].compact.each do |path|
+            if path.present? && File.exist?(path)
+              begin
+                File.delete(path)
+                Rails.logger.info "Deleted thumbnail/preview: #{path}"
+              rescue => e
+                Rails.logger.error "Failed to delete thumbnail/preview #{path}: #{e.message}"
+              end
+            end
+          end
+        end
+      end
+    end
+    
+    # Handle Video
+    if @stored_mediable_type == 'Video' && defined?(Video)
+      if @stored_mediable_id.present?
+        video = Video.find_by(id: @stored_mediable_id)
+        if video
+          [video.thumbnail_path, video.preview_path].compact.each do |path|
+            if path.present? && File.exist?(path)
+              begin
+                File.delete(path)
+                Rails.logger.info "Deleted thumbnail/preview: #{path}"
+              rescue => e
+                Rails.logger.error "Failed to delete thumbnail/preview #{path}: #{e.message}"
+              end
+            end
+          end
         end
       end
     end

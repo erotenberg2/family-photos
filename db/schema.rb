@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_11_01_210837) do
+ActiveRecord::Schema[8.0].define(version: 2025_11_02_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -241,6 +241,28 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_01_210837) do
     t.index ["first_name", "last_name"], name: "index_users_on_first_name_and_last_name"
     t.index ["reset_password_token"], name: "index_users_on_reset_password_token", unique: true
     t.index ["role"], name: "index_users_on_role"
+  end
+
+  create_table "videos", force: :cascade do |t|
+    t.string "title"
+    t.text "description"
+    t.integer "duration"
+    t.integer "width"
+    t.integer "height"
+    t.integer "bitrate"
+    t.string "camera_make"
+    t.string "camera_model"
+    t.string "thumbnail_path"
+    t.integer "thumbnail_width"
+    t.integer "thumbnail_height"
+    t.string "preview_path"
+    t.integer "preview_width"
+    t.integer "preview_height"
+    t.json "metadata", default: {}
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["duration"], name: "index_videos_on_duration"
+    t.index ["width", "height"], name: "index_videos_on_width_and_height"
   end
 
   add_foreign_key "active_storage_attachments", "active_storage_blobs", column: "blob_id"

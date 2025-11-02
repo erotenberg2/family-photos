@@ -3,18 +3,18 @@ window.MediaImportPopup = {
   // Media type definitions
   mediaTypes: {
     photo: {
-      extensions: ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif', '.webp', '.heic', '.heif'],
-      mimeTypes: ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/bmp', 'image/tiff', 'image/heic', 'image/heif', 'image/webp'],
+      extensions: ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif', '.webp', '.heic', '.heif', '.svg', '.ico'],
+      mimeTypes: ['image/jpeg', 'image/jpg', 'image/pjpeg', 'image/png', 'image/x-png', 'image/gif', 'image/bmp', 'image/x-ms-bmp', 'image/tiff', 'image/x-tiff', 'image/heic', 'image/heif', 'image/webp', 'image/svg+xml', 'image/x-icon', 'image/vnd.microsoft.icon'],
       emoji: '📸'
     },
     audio: {
-      extensions: ['.mp3', '.wav', '.aac', '.ogg', '.flac', '.m4a'],
-      mimeTypes: ['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/aac', 'audio/ogg', 'audio/flac'],
+      extensions: ['.mp3', '.wav', '.aac', '.ogg', '.flac', '.m4a', '.weba', '.oga'],
+      mimeTypes: ['audio/mpeg', 'audio/mp3', 'audio/mpg', 'audio/x-mpeg', 'audio/wav', 'audio/x-wav', 'audio/wave', 'audio/aac', 'audio/aacp', 'audio/mp4', 'audio/x-m4a', 'audio/ogg', 'audio/vorbis', 'audio/flac', 'audio/x-flac', 'audio/webm', 'audio/m4a'],
       emoji: '🎵'
     },
     video: {
-      extensions: ['.mp4', '.mov', '.avi', '.mkv', '.webm'],
-      mimeTypes: ['video/mp4', 'video/mov', 'video/avi', 'video/mkv', 'video/webm'],
+      extensions: ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.wmv', '.flv', '.m4v', '.asf', '.qt'],
+      mimeTypes: ['video/mp4', 'video/x-m4v', 'video/mp4v-es', 'video/quicktime', 'video/x-quicktime', 'video/avi', 'video/x-msvideo', 'video/msvideo', 'video/mkv', 'video/x-matroska', 'video/webm', 'video/x-ms-wmv', 'video/wmv', 'video/x-ms-asf', 'video/flv', 'video/x-flv'],
       emoji: '🎬'
     }
   },
