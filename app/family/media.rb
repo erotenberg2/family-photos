@@ -120,6 +120,14 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
         content_tag :div, Constants::SUBEVENT_LEVEL2_ICON, style: "font-size: 18px; text-align: center;", title: "Subevent level 2 storage"
       end
     end
+    column "# Versions", sortable: false do |medium|
+      version_count = medium.version_list.length
+      if version_count > 0
+        content_tag :div, version_count, style: "font-weight: bold; color: #0066cc;"
+      else
+        content_tag :div, "—", style: "color: #999;"
+      end
+    end
     column "Transitions", sortable: false do |medium|
       generate_transitions_menu(medium)
     end
@@ -672,6 +680,90 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
         end
       end
     end
+
+    # Attachments panel
+    panel "Attachments" do
+      attachments_path = resource.attachments_folder_path
+      if attachments_path && Dir.exist?(attachments_path)
+        # List files in the attachments subfolder
+        files = Dir.glob(File.join(attachments_path, '*')).select { |f| File.file?(f) }
+        
+        if files.any?
+          table_for files do
+            column "Filename" do |file_path|
+              File.basename(file_path)
+            end
+            column "Size" do |file_path|
+              size = File.size(file_path)
+              "#{(size / 1024.0).round(2)} KB"
+            end
+            column "Actions" do |file_path|
+              link_to("Download", attachment_family_medium_path(resource, filename: File.basename(file_path)),
+                style: "margin-right: 10px;") +
+              link_to("Delete", delete_attachment_family_medium_path(resource, filename: File.basename(file_path)),
+                method: :delete,
+                confirm: "Are you sure you want to delete this attachment?",
+                style: "color: red;")
+            end
+          end
+        else
+          div "No attachments", style: "padding: 20px; background: #f0f0f0; color: #666; border-radius: 8px; text-align: center;"
+        end
+      else
+        div "No attachments", style: "padding: 20px; background: #f0f0f0; color: #666; border-radius: 8px; text-align: center;"
+      end
+      
+      div do
+        link_to "Add Attachment", "#", 
+                class: 'button',
+                onclick: "document.getElementById('attachment-upload-form').style.display = 'block'; return false;",
+                style: "margin-top: 15px;"
+      end
+      
+      div id: "attachment-upload-form", style: "display: none; margin-top: 15px; padding: 15px; background: #f9f9f9; border-radius: 5px; border: 1px solid #ddd;" do
+        raw <<-HTML
+          <form action="#{add_attachment_family_medium_path(resource)}" method="post" enctype="multipart/form-data" style="margin: 0;">
+            <input type="hidden" name="authenticity_token" value="#{form_authenticity_token}">
+            <input type="file" name="attachment" required style="margin-bottom: 10px; display: block;">
+            <button type="submit" class="button" style="margin-right: 10px;">Upload</button>
+            <button type="button" class="button" style="background: #999;" onclick="document.getElementById('attachment-upload-form').style.display = 'none'; return false;">Cancel</button>
+          </form>
+        HTML
+      end
+    end
+
+    # Versions panel
+    panel "Versions" do
+      versions_list = resource.version_list.sort_by { |v| v['created_at'] }
+      
+      if versions_list.any?
+        table_for versions_list do
+          column "Version" do |version|
+            File.basename(version['filename'], File.extname(version['filename']))
+          end
+          column "Description" do |version|
+            version['description']
+          end
+          column "Created" do |version|
+            if version['created_at']
+              Time.parse(version['created_at']).strftime("%Y-%m-%d %H:%M")
+            else
+              "—"
+            end
+          end
+          column "Actions" do |version|
+            if resource.version_exists?(version['filename'])
+              link_to("Download", version_family_medium_path(resource, filename: version['filename']),
+                style: "margin-right: 10px;")
+            else
+              span "File not found", style: "color: #999;"
+            end
+          end
+        end
+      else
+        div "No versions", style: "padding: 20px; background: #f0f0f0; color: #666; border-radius: 8px; text-align: center;"
+      end
+    end
   end
 
   # Form for editing media
@@ -691,6 +783,84 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
     end
 
     f.actions
+  end
+
+  # Attachment management actions
+  member_action :add_attachment, method: :post do
+    medium = resource
+    file = params[:attachment]
+    
+    if file.present?
+      attachments_folder = medium.attachments_folder_path
+      
+      # Create aux folder and attachments subfolder if they don't exist
+      unless Dir.exist?(attachments_folder)
+        FileUtils.mkdir_p(attachments_folder)
+      end
+      
+      # Save the uploaded file to the attachments folder
+      file_path = File.join(attachments_folder, file.original_filename)
+      File.binwrite(file_path, file.read)
+      
+      redirect_to family_medium_path(medium), notice: "Attachment added successfully"
+    else
+      redirect_to family_medium_path(medium), alert: "No file provided"
+    end
+  end
+
+  member_action :delete_attachment, method: :delete do
+    medium = resource
+    filename = params[:filename]
+    
+    if filename.present?
+      attachments_folder = medium.attachments_folder_path
+      file_path = File.join(attachments_folder, filename)
+      
+      if File.exist?(file_path)
+        File.delete(file_path)
+        redirect_to family_medium_path(medium), notice: "Attachment deleted successfully"
+      else
+        redirect_to family_medium_path(medium), alert: "File not found"
+      end
+    else
+      redirect_to family_medium_path(medium), alert: "No filename provided"
+    end
+  end
+
+  member_action :attachment, method: :get do
+    medium = resource
+    filename = params[:filename]
+    
+    if filename.present?
+      attachments_folder = medium.attachments_folder_path
+      file_path = File.join(attachments_folder, filename)
+      
+      if File.exist?(file_path)
+        send_file(file_path, disposition: 'attachment')
+      else
+        redirect_to family_medium_path(medium), alert: "File not found"
+      end
+    else
+      redirect_to family_medium_path(medium), alert: "No filename provided"
+    end
+  end
+
+  member_action :version, method: :get do
+    medium = resource
+    filename = params[:filename]
+    
+    if filename.present?
+      versions_folder = medium.versions_folder_path
+      file_path = File.join(versions_folder, filename)
+      
+      if File.exist?(file_path)
+        send_file(file_path, disposition: 'attachment')
+      else
+        redirect_to family_medium_path(medium), alert: "Version file not found"
+      end
+    else
+      redirect_to family_medium_path(medium), alert: "No filename provided"
+    end
   end
 
   # Handle form submission for filename editing
@@ -881,7 +1051,7 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
         
         # Process accepted files
         
-          filtered_files.each_with_index do |file_info, index|
+        filtered_files.each_with_index do |file_info, index|
           file = file_info[:file]
           medium_type = file_info[:medium_type]
           # Find the client file path and date for this filtered file
@@ -892,7 +1062,7 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
           # Debug: Log received metadata
           if client_file_date.present?
             client_date = Time.at(client_file_date.to_i / 1000.0)
-            Rails.logger.info "Processing #{medium_type}: #{file.original_filename} (client path: #{client_file_path})"
+          Rails.logger.info "Processing #{medium_type}: #{file.original_filename} (client path: #{client_file_path})"
             Rails.logger.info "  DEBUG: Received client_file_date: #{client_file_date} -> #{client_date}"
           else
             Rails.logger.info "Processing #{medium_type}: #{file.original_filename} (client path: #{client_file_path})"

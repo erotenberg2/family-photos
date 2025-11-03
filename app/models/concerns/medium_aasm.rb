@@ -243,10 +243,25 @@ module MediumAasm
         Rails.logger.info "✅ File already at unsorted: #{dest_path}"
         return true
       end
+      
+      # Save the old filename before updating
+      old_filename = current_filename
+      
+      # Move the main file
       FileUtils.mv(source_path, dest_path)
+      
+      # Move aux folder if it exists (using old filename to construct old aux folder path)
+      unless move_aux_folder(old_dir, dest_dir, old_filename, dest_filename)
+        # If aux folder move failed, roll back the main file move
+        FileUtils.mv(dest_path, source_path)
+        Rails.logger.error "❌ Rolled back file move due to aux folder failure"
+        return false
+      end
+      
       # Update in-memory attributes (persisted after transition)
       self.current_filename = File.basename(dest_path)
       Rails.logger.info "✅ Moved file to unsorted: #{dest_path}"
+      
       # Clean up empty directories in source location
       cleanup_empty_directories(old_dir)
       true
@@ -279,7 +294,21 @@ module MediumAasm
     Rails.logger.info "daily: dest_dir=#{daily_dir} dest_path=#{new_path}"
     if File.exist?(source_path) && source_path != new_path
       Rails.logger.info "daily: moving #{source_path} -> #{new_path}"
+      
+      # Save the old filename before updating
+      old_filename = current_filename
+      
+      # Move the main file
       FileUtils.mv(source_path, new_path)
+      
+      # Move aux folder if it exists
+      unless move_aux_folder(old_dir, daily_dir, old_filename, current_filename)
+        # If aux folder move failed, roll back the main file move
+        FileUtils.mv(new_path, source_path)
+        Rails.logger.error "❌ Rolled back file move due to aux folder failure"
+        return false
+      end
+      
       # Update in-memory attributes (will be saved by AASM)
       Rails.logger.info "✅ Moved file to: #{new_path}"
       
@@ -346,7 +375,20 @@ module MediumAasm
     if source_exists && source_path != new_path
       Rails.logger.info "   📦 Moving file: #{source_path} -> #{new_path}"
       begin
+        # Save the old filename before updating
+        old_filename = current_filename
+        
+        # Move the main file
         FileUtils.mv(source_path, new_path)
+        
+        # Move aux folder if it exists
+        unless move_aux_folder(old_dir, event_dir, old_filename, current_filename)
+          # If aux folder move failed, roll back the main file move
+          FileUtils.mv(new_path, source_path)
+          Rails.logger.error "   ❌ Rolled back file move due to aux folder failure"
+          return false
+        end
+        
         Rails.logger.info "   ✅ File moved successfully"
         
         # Update in-memory attributes (will be saved by AASM)
@@ -458,7 +500,20 @@ module MediumAasm
       if source_exists && source_path != new_path
         Rails.logger.info "   📦 Moving file: #{source_path} -> #{new_path}"
         begin
+          # Save the old filename before updating
+          old_filename = current_filename
+          
+          # Move the main file
           FileUtils.mv(source_path, new_path)
+          
+          # Move aux folder if it exists
+          unless move_aux_folder(old_dir, subevent_dir, old_filename, current_filename)
+            # If aux folder move failed, roll back the main file move
+            FileUtils.mv(new_path, source_path)
+            Rails.logger.error "   ❌ Rolled back file move due to aux folder failure"
+            return false
+          end
+          
           Rails.logger.info "   ✅ File moved successfully"
           
           # Update in-memory attributes (will be saved by AASM)
@@ -516,6 +571,32 @@ module MediumAasm
       else
         break  # Directory not empty or doesn't exist, stop here
       end
+    end
+  end
+
+  # Move aux folder along with the main file
+  # Returns true if successful or no aux folder exists, false on error
+  def move_aux_folder(old_dir, new_dir, old_filename, new_filename)
+    old_base = File.basename(old_filename, File.extname(old_filename))
+    new_base = File.basename(new_filename, File.extname(new_filename))
+    old_aux_path = File.join(old_dir, "#{old_base}_aux")
+    new_aux_path = File.join(new_dir, "#{new_base}_aux")
+    
+    # If no aux folder exists, that's fine - nothing to move
+    unless Dir.exist?(old_aux_path)
+      Rails.logger.debug "No aux folder to move: #{old_aux_path}"
+      return true
+    end
+    
+    begin
+      # Move the entire aux folder
+      Rails.logger.info "Moving aux folder: #{old_aux_path} -> #{new_aux_path}"
+      FileUtils.mv(old_aux_path, new_aux_path)
+      Rails.logger.info "✅ Successfully moved aux folder"
+      true
+    rescue => e
+      Rails.logger.error "❌ Failed to move aux folder: #{e.message}"
+      false
     end
   end
   

@@ -19,7 +19,19 @@ This is a Rails + ActiveAdmin project for managing family media (photos, videos,
   - Extracts GPS coordinates and camera metadata
   - Generates thumbnails (128px) and previews (400px)
 
-- **Audio/Video**: Currently stubbed (future support)
+- **Audio**: Audio media record
+  - Stores: Artist, album, genre, duration, bitrate
+  - Extended metadata: year, track, comment, album_artist, composer, disc_number, BPM, compilation, publisher, copyright, ISRC
+  - Extracts metadata using `ffprobe`
+  - Optional cover art path
+  - Generic JSON metadata field for additional data
+
+- **Video**: Video media record
+  - Stores: Duration, dimensions (width/height), bitrate, camera make/model
+  - Generates thumbnails (128px) and previews (400px) via `ffmpeg`
+  - Extracts video dimensions using `ffprobe`
+  - Supports: mp4, mov, avi, wmv, flv, m4v, asf, qt, webm, mkv
+  - Processing marked complete even if thumbnail generation fails (allows videos without ffmpeg)
 
 #### State Machine (AASM)
 Medium records use a state machine for organization:
@@ -48,22 +60,29 @@ State transitions automatically move files on disk via before/after callbacks.
 ```
 ~/Desktop/Family Album/
   ├── unsorted/          # Initial uploads
+  │   ├── YYYYMMDD_HHMMSS-filename.jpg
+  │   └── YYYYMMDD_HHMMSS-filename_aux/
+  │       └── attachments/
+  │           └── (attachment files)
   ├── daily/
   │   ├── YYYY/
   │   │   ├── MM/
   │   │   │   └── DD/
+  │   │   │       └── YYYYMMDD_HHMMSS-filename.jpg
   │   └── ...
   └── events/
       └── YYYY-MM-DD_to_YYYY-MM-DD_Event_Name/
           ├── (event media)
+          ├── YYYYMMDD_HHMMSS-filename.jpg
+          ├── YYYYMMDD_HHMMSS-filename_aux/attachments/...
           ├── Subevent_Name/
           │   ├── (subevent media)
           │   └── Child_Subevent/
           └── ...
 
 ~/Desktop/Family Album Internals/
-  ├── thumbs/           # 128px thumbnails
-  └── previews/         # 400px previews
+  ├── thumbs/           # 128px thumbnails (photos/videos)
+  └── previews/         # 400px previews (photos/videos)
 ```
 
 #### Path Computation
@@ -76,8 +95,14 @@ File paths are **computed at runtime** from state, not stored in database:
 
 Three datetime sources (priority order):
 1. **datetime_user**: Manual override (highest priority)
-2. **datetime_intrinsic**: Extracted from EXIF/metadata
-3. **datetime_inferred**: Upload timestamp (fallback)
+2. **datetime_intrinsic**: Extracted from EXIF/metadata (photos) or file metadata (audio/video)
+3. **datetime_inferred**: Client file modification time or upload timestamp (fallback)
+
+**datetime_inferred** implementation:
+- Uses `file.lastModified` from the browser when available (for older files)
+- Falls back to upload timestamp if no modification time available
+- Always set as fallback, even when intrinsic datetime exists
+- Validates date range: Unix epoch (1970-01-01) to 1 day in the future
 
 Access via: `Medium#effective_datetime`
 
@@ -93,11 +118,30 @@ Filename format: `YYYYMMDD_HHMMSS-descriptive_name.extension`
 5. UploadLog records batch statistics
 
 #### Post-Processing Phase (Async Job)
-1. Extract EXIF metadata (for photos)
+
+**Photos:**
+1. Extract EXIF metadata
 2. Generate datetime_intrinsic from EXIF
-3. Rename file to use proper datetime-based filename
-4. Generate thumbnails and previews (for photos)
-5. Extract GPS coordinates (for photos)
+3. Set datetime_inferred if no intrinsic datetime
+4. Rename file to use proper datetime-based filename
+5. Generate thumbnails (128px) and previews (400px)
+6. Extract GPS coordinates
+7. Update processing timestamps
+
+**Audio:**
+1. Extract metadata using `ffprobe`
+2. Set datetime_intrinsic if available from metadata
+3. Set datetime_inferred (always)
+4. Rename file to use proper datetime-based filename
+5. Extract extended metadata (artist, album, genre, year, track, etc.)
+6. Update processing timestamps
+
+**Video:**
+1. Extract dimensions using `ffprobe`
+2. Set datetime_intrinsic if available from metadata
+3. Set datetime_inferred (always)
+4. Rename file to use proper datetime-based filename
+5. Generate thumbnail (128px) and preview (400px) via `ffmpeg` (optional - marked processed even if fails)
 6. Update processing timestamps
 
 Jobs:
@@ -128,6 +172,7 @@ Jobs:
 - Resolves filename conflicts via `-(N)` suffix
 - Cleans up empty directories
 - Updates database to match file system
+- Moves associated aux folder with all contents (including attachments)
 
 #### Guard Conditions
 - `can_move_to_daily?`: Requires valid datetime
@@ -217,7 +262,20 @@ Pretty-formats JSON for display (EXIF data)
 - EXIF for photos (via exifr gem)
 - GPS coordinates
 - Camera make/model
-- Thumbnails and previews via MiniMagick
+- Thumbnails and previews via MiniMagick (photos/videos)
+- Audio metadata via ffprobe (ID3 tags, duration, bitrate)
+- Video metadata via ffprobe (dimensions, duration, bitrate)
+- Video thumbnails via ffmpeg (optional)
+
+### Medium Attachments
+Each Medium can have an auxiliary folder for related files:
+- **Aux Folder**: `filename_base_aux/` alongside the main file
+- **Attachments Subfolder**: `filename_base_aux/attachments/` for user-uploaded files
+- Automatic management: aux folder moves and renames with the main file
+- Destroy cleanup: aux folder and all contents deleted when medium is destroyed
+- UI: ActiveAdmin show page with upload/download/delete interface
+- Flexible: room for other categories in aux folder (separate from attachments)
+- No database storage: attachments detected by scanning directory
 
 ## Technical Stack
 
@@ -230,6 +288,7 @@ Pretty-formats JSON for display (EXIF data)
 - Redis (progress tracking)
 - MiniMagick (image processing)
 - exifr (EXIF extraction)
+- ffmpeg/ffprobe (video/audio processing)
 
 ## State Flow Example
 

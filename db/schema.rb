@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_11_03_000001) do
+ActiveRecord::Schema[8.0].define(version: 2025_11_04_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -154,6 +154,7 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_03_000001) do
     t.bigint "subevent_id"
     t.string "current_filename", null: false
     t.string "storage_state", default: "unsorted", null: false
+    t.json "versions", default: []
     t.index ["created_at"], name: "index_media_on_created_at"
     t.index ["current_filename"], name: "index_media_on_current_filename"
     t.index ["datetime_inferred"], name: "index_media_on_datetime_inferred"

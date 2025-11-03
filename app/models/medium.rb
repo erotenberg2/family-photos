@@ -414,6 +414,38 @@ class Medium < ApplicationRecord
     full_file_path.present? && File.exist?(full_file_path)
   end
 
+  # Get the aux folder path for this medium
+  def aux_folder_path
+    return nil unless current_filename.present?
+    base_name = File.basename(current_filename, File.extname(current_filename))
+    File.join(computed_directory_path, "#{base_name}_aux")
+  end
+
+  # Get the attachments subfolder path within aux folder
+  def attachments_folder_path
+    return nil unless aux_folder_path.present?
+    File.join(aux_folder_path, 'attachments')
+  end
+
+  # Get the versions subfolder path within aux folder
+  def versions_folder_path
+    return nil unless aux_folder_path.present?
+    File.join(aux_folder_path, 'versions')
+  end
+
+  # Check if aux folder exists
+  def aux_folder_exists?
+    aux_folder_path.present? && Dir.exist?(aux_folder_path)
+  end
+
+  # Get the old aux folder path (before rename or move)
+  def old_aux_folder_path(old_filename: nil)
+    old_name = old_filename || current_filename_was
+    return nil unless old_name.present?
+    base_name = File.basename(old_name, File.extname(old_name))
+    File.join(computed_directory_path, "#{base_name}_aux")
+  end
+
   # Compute directory based on state and associations
   def computed_directory_path
     require_relative '../../lib/constants'
@@ -1356,11 +1388,98 @@ class Medium < ApplicationRecord
         end
       end
       
+      # Rename aux folder if it exists
+      old_filename = medium.current_filename_was || (old_file_path ? File.basename(old_file_path) : nil)
+      if old_filename && old_filename != new_filename
+        dir = File.dirname(new_file_path)
+        old_base = File.basename(old_filename, File.extname(old_filename))
+        new_base = File.basename(new_filename, File.extname(new_filename))
+        old_aux_path = File.join(dir, "#{old_base}_aux")
+        new_aux_path = File.join(dir, "#{new_base}_aux")
+        
+        if Dir.exist?(old_aux_path)
+          begin
+            FileUtils.mv(old_aux_path, new_aux_path)
+            Rails.logger.info "Renamed aux folder from #{old_aux_path} to #{new_aux_path}"
+          rescue => e
+            Rails.logger.error "Failed to rename aux folder: #{e.message}"
+          end
+        end
+      end
+      
       true
     rescue => e
       Rails.logger.error "Failed to rename file: #{e.message}"
       false
     end
+  end
+
+  # Version Management Methods
+  
+  # Get all versions for this medium
+  def version_list
+    versions || []
+  end
+  
+  # Add a new version to this medium
+  # Called by mediable types when they create a modified version
+  # @param original_file_path [String] Path to the temporary modified file
+  # @param description [String] Description of what makes this version different
+  # @param options [Hash] Additional options
+  # @return [Boolean] Success or failure
+  def add_version(original_file_path, description, options = {})
+    return false unless original_file_path.present? && File.exist?(original_file_path)
+    return false unless description.present?
+    
+    versions_folder = versions_folder_path
+    
+    # Create versions folder if it doesn't exist
+    unless Dir.exist?(versions_folder)
+      FileUtils.mkdir_p(versions_folder)
+    end
+    
+    # Generate version filename
+    version_number = version_list.length + 1
+    original_ext = File.extname(current_filename)
+    version_filename = "v#{version_number}_#{description.parameterize}#{original_ext}"
+    version_path = File.join(versions_folder, version_filename)
+    
+    # Move the original file to versions
+    begin
+      FileUtils.mv(original_file_path, version_path)
+      
+      # Add version entry to database
+      now = Time.current.iso8601
+      version_entry = {
+        'filename' => version_filename,
+        'description' => description,
+        'created_at' => now,
+        'modified_at' => now
+      }
+      
+      current_versions = version_list
+      current_versions << version_entry
+      
+      update_columns(versions: current_versions)
+      
+      Rails.logger.info "Added version: #{version_filename} - #{description}"
+      true
+    rescue => e
+      Rails.logger.error "Failed to add version: #{e.message}"
+      false
+    end
+  end
+  
+  # Get the path to a specific version file
+  def version_file_path(version_filename)
+    return nil unless version_filename.present?
+    File.join(versions_folder_path, version_filename)
+  end
+  
+  # Check if a version file exists
+  def version_exists?(version_filename)
+    path = version_file_path(version_filename)
+    path.present? && File.exist?(path)
   end
 
   private
@@ -1399,6 +1518,9 @@ class Medium < ApplicationRecord
         
         # Also rename thumbnail and preview files if they exist
         rename_associated_files(old_filename, new_filename)
+        
+        # Rename aux folder if it exists
+        rename_aux_folder(old_filename, new_filename, dir)
         
       rescue => e
         Rails.logger.error "❌ Failed to rename file: #{e.message}"
@@ -1448,6 +1570,9 @@ class Medium < ApplicationRecord
         
         # Also rename associated files
         rename_associated_files(current_filename_was, new_filename)
+        
+        # Rename aux folder if it exists
+        rename_aux_folder(current_filename_was, new_filename, dir)
         
         Rails.logger.info "✅ Successfully renamed file due to datetime change: #{new_filename}"
       rescue => e
@@ -1514,10 +1639,32 @@ class Medium < ApplicationRecord
     end
   end
 
+  # Rename aux folder when filename changes
+  def rename_aux_folder(old_filename, new_filename, dir)
+    old_base = File.basename(old_filename, File.extname(old_filename))
+    new_base = File.basename(new_filename, File.extname(new_filename))
+    old_aux_path = File.join(dir, "#{old_base}_aux")
+    new_aux_path = File.join(dir, "#{new_base}_aux")
+    
+    # If no aux folder exists, that's fine
+    unless Dir.exist?(old_aux_path)
+      Rails.logger.debug "No aux folder to rename: #{old_aux_path}"
+      return
+    end
+    
+    begin
+      FileUtils.mv(old_aux_path, new_aux_path)
+      Rails.logger.info "✅ Renamed aux folder: #{old_aux_path} -> #{new_aux_path}"
+    rescue => e
+      Rails.logger.error "❌ Failed to rename aux folder: #{e.message}"
+    end
+  end
+
   # Store mediable info before destroy for cleanup
   def store_mediable_info
     @stored_mediable_id = mediable_id
     @stored_mediable_type = mediable_type
+    @stored_aux_folder_path = aux_folder_path
   end
 
   # Cleanup thumbnails and previews when medium is destroyed
@@ -1559,6 +1706,16 @@ class Medium < ApplicationRecord
             end
           end
         end
+      end
+    end
+    
+    # Cleanup aux folder if it exists
+    if @stored_aux_folder_path.present? && Dir.exist?(@stored_aux_folder_path)
+      begin
+        FileUtils.rm_rf(@stored_aux_folder_path)
+        Rails.logger.info "Deleted aux folder: #{@stored_aux_folder_path}"
+      rescue => e
+        Rails.logger.error "Failed to delete aux folder #{@stored_aux_folder_path}: #{e.message}"
       end
     end
   end
