@@ -99,6 +99,22 @@ ActiveAdmin.register Video, namespace: :family do
     # Video preview panel
     panel "Video Preview" do
       if video.file_exists?
+        # Check if video format is supported by browsers
+        unsupported_formats = ['video/x-ms-wmv', 'video/wmv', 'video/x-ms-asf', 'video/flv', 'video/x-flv']
+        
+        if unsupported_formats.include?(video.content_type)
+          div do
+            para "⚠️ This video format (#{video.content_type}) may not play in all browsers.", 
+                 style: "color: #856404; background: #fff3cd; border: 1px solid #ffeaa7; padding: 15px; border-radius: 4px; margin-bottom: 15px;"
+            
+            li ("Download the video file to play it: " + 
+                link_to("Download #{video.original_filename}", 
+                        image_path(video.medium),
+                        download: video.original_filename,
+                        style: "font-weight: bold; color: #007bff;")).html_safe
+          end
+        end
+        
         video_tag image_path(video.medium), 
                   controls: true, 
                   style: "max-width: 600px; max-height: 400px; margin: 0 auto; display: block;"

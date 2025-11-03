@@ -511,7 +511,7 @@ class Medium < ApplicationRecord
 
   # Class method to create medium from uploaded file
   def self.create_from_uploaded_file(uploaded_file, user, medium_type = nil, 
-              post_process: false, batch_id: nil, session_id: nil, client_file_path: nil)
+              post_process: false, batch_id: nil, session_id: nil, client_file_path: nil, client_file_date: nil)
     upload_started_at = Time.current
     
     # Determine medium type if not specified
@@ -569,7 +569,7 @@ class Medium < ApplicationRecord
       uploaded_by: user,
       user: user,
       client_file_path: client_file_path,
-      datetime_source_last_modified: extract_file_last_modified(uploaded_file),
+      datetime_source_last_modified: extract_file_last_modified(uploaded_file, client_file_date),
       upload_started_at: upload_started_at,
       upload_completed_at: upload_completed_at,
       upload_batch_id: batch_id,
@@ -778,23 +778,24 @@ class Medium < ApplicationRecord
         datetime_intrinsic = photo.datetime_intrinsic
         Rails.logger.info "Extracted datetime_intrinsic: #{datetime_intrinsic} for #{medium.original_filename}"
         
-        # Update Medium with intrinsic datetime or set inferred datetime
+        # Update Medium with intrinsic datetime if present
         if datetime_intrinsic.present?
           medium.update_columns(datetime_intrinsic: datetime_intrinsic)
           Rails.logger.info "Set datetime_intrinsic: #{datetime_intrinsic} for #{medium.original_filename}"
           
           # Rename file to use proper datetime-based filename
           rename_file_to_datetime_based_name(medium, datetime_intrinsic)
-        else
-          # No EXIF datetime - use upload time as inferred
-          datetime_inferred = medium.created_at
-          medium.update_columns(datetime_inferred: datetime_inferred)
-          Rails.logger.info "Set datetime_inferred: #{datetime_inferred} for #{medium.original_filename}"
-          
-          # Still generate thumbnail and preview even without EXIF datetime
-          medium.mediable.generate_thumbnail if medium.mediable&.respond_to?(:generate_thumbnail)
-          medium.mediable.generate_preview if medium.mediable&.respond_to?(:generate_preview)
         end
+        
+        # ALWAYS set datetime_inferred as a fallback, regardless of whether intrinsic exists
+        # This ensures we have at least one datetime for sorting/organization
+        datetime_inferred = medium.datetime_source_last_modified || get_file_mtime_for_inferred_datetime(medium.full_file_path) || medium.created_at
+        medium.update_columns(datetime_inferred: datetime_inferred)
+        Rails.logger.info "Set datetime_inferred: #{datetime_inferred} for #{medium.original_filename}"
+        
+        # Still generate thumbnail and preview even without EXIF datetime
+        medium.mediable.generate_thumbnail if medium.mediable&.respond_to?(:generate_thumbnail)
+        medium.mediable.generate_preview if medium.mediable&.respond_to?(:generate_preview)
         
         # Update Medium with location data from Photo
         if photo.latitude.present? && photo.longitude.present?
@@ -810,7 +811,34 @@ class Medium < ApplicationRecord
         medium.mediable.generate_preview if medium.mediable&.respond_to?(:generate_preview)
       end
     when 'audio'
-      # Extract audio metadata when we add audio support
+      # Extract audio metadata
+      if medium.mediable&.respond_to?(:extract_metadata_from_ffprobe, true)
+        audio = medium.mediable
+        audio.send(:extract_metadata_from_ffprobe)
+        # Use update_columns to bypass callbacks and avoid infinite loop
+        audio.update_columns(
+          title: audio.title,
+          artist: audio.artist,
+          album: audio.album,
+          genre: audio.genre,
+          duration: audio.duration,
+          bitrate: audio.bitrate,
+          year: audio.year,
+          track: audio.track,
+          comment: audio.comment,
+          album_artist: audio.album_artist,
+          composer: audio.composer,
+          disc_number: audio.disc_number,
+          bpm: audio.bpm,
+          compilation: audio.compilation,
+          publisher: audio.publisher,
+          copyright: audio.copyright,
+          isrc: audio.isrc,
+          metadata: audio.metadata
+        )
+      end
+      
+      # Handle datetime
       datetime_intrinsic = medium.mediable.datetime_intrinsic if medium.mediable&.respond_to?(:datetime_intrinsic)
       
       if datetime_intrinsic.present?
@@ -818,8 +846,10 @@ class Medium < ApplicationRecord
         # Rename file to use proper datetime-based filename
         rename_file_to_datetime_based_name(medium, datetime_intrinsic)
       else
-        datetime_inferred = medium.created_at
+        # Use file modification time as inferred
+        datetime_inferred = medium.datetime_source_last_modified || get_file_mtime_for_inferred_datetime(medium.full_file_path) || medium.created_at
         medium.update_columns(datetime_inferred: datetime_inferred)
+        Rails.logger.info "Set datetime_inferred: #{datetime_inferred} for #{medium.original_filename}"
         # Rename file to use inferred datetime
         rename_file_to_datetime_based_name(medium, datetime_inferred)
       end
@@ -832,8 +862,10 @@ class Medium < ApplicationRecord
         # Rename file to use proper datetime-based filename
         rename_file_to_datetime_based_name(medium, datetime_intrinsic)
       else
-        datetime_inferred = medium.created_at
+        # Use file modification time as inferred
+        datetime_inferred = medium.datetime_source_last_modified || get_file_mtime_for_inferred_datetime(medium.full_file_path) || medium.created_at
         medium.update_columns(datetime_inferred: datetime_inferred)
+        Rails.logger.info "Set datetime_inferred: #{datetime_inferred} for #{medium.original_filename}"
         # Rename file to use inferred datetime
         rename_file_to_datetime_based_name(medium, datetime_inferred)
       end
@@ -1164,13 +1196,65 @@ class Medium < ApplicationRecord
   private
 
   # Extract last modified time from uploaded file
-  # Note: ActionDispatch::Http::UploadedFile doesn't preserve the client's original
-  # file modification time. The tempfile will have the current time.
-  # For true client file modification time, we'd need to capture it in JavaScript
-  # and send it as a separate parameter.
-  def self.extract_file_last_modified(uploaded_file)
-    # For now, use current time as the source modification time
-    # This represents when the file was uploaded/processed
+  # Now we can capture it from JavaScript using the File API's lastModified property
+  def self.extract_file_last_modified(uploaded_file, client_file_date = nil)
+    Rails.logger.info "=== EXTRACT FILE LAST MODIFIED DEBUG ==="
+    Rails.logger.info "client_file_date value: #{client_file_date.inspect} (#{client_file_date.class})"
+    
+    # First, try the client-provided lastModified date from JavaScript
+    if client_file_date.present?
+      begin
+        # Convert to integer first (FormData sends as string), then milliseconds to Time object
+        timestamp_ms = client_file_date.to_i
+        Rails.logger.info "Converted to integer: #{timestamp_ms}"
+        client_date = Time.at(timestamp_ms / 1000.0)
+        Rails.logger.info "Converted to Time: #{client_date}"
+        
+        # Allow dates from 1970 (Unix epoch) to 1 day in the future
+        # This is much more permissive - files could be from any time in history
+        min_date = Time.at(0)  # Unix epoch: 1970-01-01
+        max_date = 1.day.from_now
+        Rails.logger.info "Checking if #{client_date} is between #{min_date} and #{max_date}"
+        
+        # Only use if it's reasonable (not before Unix epoch, not too far in future)
+        if client_date >= min_date && client_date < max_date
+          Rails.logger.info "✅ USING client-provided lastModified: #{client_date}"
+          return client_date
+        else
+          Rails.logger.info "❌ REJECTED client-provided date (out of range)"
+        end
+      rescue => e
+        Rails.logger.error "❌ Could not convert client_file_date: #{e.message}"
+      end
+    else
+      Rails.logger.info "No client_file_date provided"
+    end
+    
+    # Fallback: Try to get the file's modification time from the tempfile
+    # While browsers don't transfer lastModified automatically, the OS might preserve it
+    begin
+      if uploaded_file.tempfile && File.exist?(uploaded_file.tempfile.path)
+        file_mtime = File.mtime(uploaded_file.tempfile.path)
+        Rails.logger.info "Tempfile mtime: #{file_mtime}"
+        # Only use file modification time if it's reasonable (not before Unix epoch, not too far in future)
+        min_date = Time.at(0)  # Unix epoch: 1970-01-01
+        max_date = 1.day.from_now
+        if file_mtime >= min_date && file_mtime < max_date
+          Rails.logger.info "✅ USING tempfile mtime: #{file_mtime}"
+          return file_mtime
+        else
+          Rails.logger.info "❌ REJECTED tempfile mtime (out of range)"
+        end
+      else
+        Rails.logger.info "No tempfile or tempfile doesn't exist"
+      end
+    rescue => e
+      Rails.logger.error "Could not get file modification time: #{e.message}"
+    end
+    
+    # Final fallback: current time
+    Rails.logger.info "⚠️ USING FINAL FALLBACK: current time #{Time.current}"
+    Rails.logger.info "=== END EXTRACT FILE LAST MODIFIED DEBUG ==="
     Time.current
   end
 
@@ -1191,6 +1275,23 @@ class Medium < ApplicationRecord
     
     # Fall back to current time
     Time.current
+  end
+
+  # Get file modification time from a saved file path for use as datetime_inferred
+  def self.get_file_mtime_for_inferred_datetime(file_path)
+    return nil unless file_path && File.exist?(file_path)
+    
+    begin
+      file_mtime = File.mtime(file_path)
+      # Only use file modification time if it's reasonable (not too old, not too far in future)
+      if file_mtime > 10.years.ago && file_mtime < 1.day.from_now
+        return file_mtime
+      end
+    rescue => e
+      Rails.logger.debug "Could not get file modification time from #{file_path}: #{e.message}"
+    end
+    
+    nil
   end
 
   # Rename file to use proper datetime-based filename during post-processing

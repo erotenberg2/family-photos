@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_11_02_000001) do
+ActiveRecord::Schema[8.0].define(version: 2025_11_03_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -94,6 +94,22 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_02_000001) do
     t.string "genre"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.integer "year"
+    t.string "track"
+    t.text "comment"
+    t.string "album_artist"
+    t.string "composer"
+    t.string "disc_number"
+    t.integer "bpm"
+    t.boolean "compilation", default: false
+    t.string "publisher"
+    t.string "copyright"
+    t.string "isrc"
+    t.string "cover_art_path"
+    t.json "metadata", default: {}
+    t.index ["artist", "album"], name: "index_audios_on_artist_and_album"
+    t.index ["compilation"], name: "index_audios_on_compilation"
+    t.index ["year"], name: "index_audios_on_year"
   end
 
   create_table "events", force: :cascade do |t|

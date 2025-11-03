@@ -1,4 +1,5 @@
 // Media Import Popup functionality
+console.log('MEDIA IMPORT POPUP JS LOADING...');
 window.MediaImportPopup = {
   // Media type definitions
   mediaTypes: {
@@ -109,6 +110,16 @@ window.MediaImportPopup = {
     const files = Array.from(event.target.files);
     console.log(`Selected ${files.length} files from directory`);
     console.log('First few files:', files.slice(0, 3).map(f => f.name));
+    
+    // Debug: Log file metadata including lastModified
+    console.log('File metadata for first 3 files:');
+    files.slice(0, 3).forEach(file => {
+      console.log(`File: ${file.name}`);
+      console.log(`  - lastModified: ${file.lastModified} (${new Date(file.lastModified)})`);
+      console.log(`  - size: ${file.size}`);
+      console.log(`  - type: ${file.type}`);
+      console.log(`  - webkitRelativePath: ${file.webkitRelativePath}`);
+    });
     
     this.currentFiles = files;
     console.log('Stored files in currentFiles:', this.currentFiles.length);
@@ -242,6 +253,12 @@ window.MediaImportPopup = {
       // Add client file paths
       chunk.forEach(file => {
         formData.append('client_file_paths[]', file.webkitRelativePath || file.name);
+      });
+      
+      // Add client file last modified dates
+      chunk.forEach(file => {
+        formData.append('client_file_dates[]', file.lastModified);
+        console.log(`Adding lastModified for ${file.name}: ${file.lastModified} (${new Date(file.lastModified)})`);
       });
       
       // Add media types

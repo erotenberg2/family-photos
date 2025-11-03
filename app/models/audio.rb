@@ -35,8 +35,9 @@ class Audio < ApplicationRecord
   # Note: Medium creates Audio, not the other way around
 
   def self.ransackable_attributes(auth_object = nil)
-    ["album", "artist", "bitrate", "created_at", "description", "duration", 
-     "genre", "id", "title", "updated_at"]
+    ["album", "album_artist", "artist", "bitrate", "bpm", "comment", "compilation", 
+     "composer", "copyright", "created_at", "description", "disc_number", "duration", 
+     "genre", "id", "isrc", "publisher", "title", "track", "updated_at", "year"]
   end
 
   def self.ransackable_associations(auth_object = nil)
@@ -59,10 +60,96 @@ class Audio < ApplicationRecord
     nil
   end
 
+  # Extract metadata from audio file using ffprobe/ffmpeg
+  def extract_metadata_from_ffprobe
+    return unless medium&.full_file_path.present? && File.exist?(medium.full_file_path)
+    
+    begin
+      require 'open3'
+      
+      # Use ffprobe to get detailed metadata
+      ffprobe_cmd = [
+        'ffprobe',
+        '-v', 'error',
+        '-print_format', 'json',
+        '-show_format',
+        '-show_streams',
+        medium.full_file_path
+      ]
+      
+      stdout, stderr, status = Open3.capture3(*ffprobe_cmd)
+      
+      if status.success? && stdout.present?
+        data = JSON.parse(stdout)
+        format_info = data['format']
+        stream_info = data['streams']&.first
+        
+        # Extract metadata from format tags
+        tags = format_info['tags'] || {}
+        
+        # Core metadata
+        self.title = tags['title']&.strip
+        self.artist = tags['artist']&.strip
+        self.album = tags['album']&.strip
+        self.genre = tags['genre']&.strip
+        self.comment = tags['comment']&.strip
+        self.track = tags['track']&.strip
+        self.year = tags['date']&.strip&.to_i rescue nil
+        
+        # Extended metadata
+        self.album_artist = tags['album_artist']&.strip
+        self.composer = tags['composer']&.strip
+        self.disc_number = tags['disc']&.strip
+        self.publisher = tags['publisher']&.strip || tags['label']&.strip
+        self.copyright = tags['copyright']&.strip
+        self.isrc = tags['ISRC']&.strip
+        
+        # BPM (beats per minute)
+        bpm_str = tags['TBPM']&.strip || tags['BPM']&.strip
+        if bpm_str.present?
+          self.bpm = bpm_str.to_i
+        end
+        
+        # Compilation flag (boolean)
+        compilation_str = tags['compilation']&.strip
+        if compilation_str.present?
+          self.compilation = ['1', 'true', 'yes'].include?(compilation_str.downcase)
+        end
+        
+        # Extract duration from format
+        duration_str = format_info['duration']
+        if duration_str.present?
+          self.duration = duration_str.to_f.round
+        end
+        
+        # Extract bitrate from format
+        bitrate_str = format_info['bit_rate']
+        if bitrate_str.present?
+          # Convert bps to kbps
+          self.bitrate = (bitrate_str.to_i / 1000.0).round
+        end
+        
+        # Store raw metadata for reference
+        self.metadata = tags
+        
+        Rails.logger.info "Extracted audio metadata for: #{medium.full_file_path}"
+        Rails.logger.info "  Title: #{self.title}, Artist: #{self.artist}, Album: #{self.album}, Genre: #{self.genre}"
+        Rails.logger.info "  Year: #{self.year}, Track: #{self.track}, Duration: #{self.duration}s, Bitrate: #{self.bitrate} kbps"
+        Rails.logger.info "  Album Artist: #{self.album_artist}, Composer: #{self.composer}, Publisher: #{self.publisher}"
+      else
+        Rails.logger.error "FFprobe failed: #{stderr}"
+      end
+    rescue => e
+      Rails.logger.error "Exception extracting audio metadata: #{e.message}"
+      Rails.logger.error e.backtrace.join("\n")
+    end
+  end
+
   # Check if post-processing has been completed
   def post_processed?
-    # Audio post-processing completed if metadata fields are populated
-    duration.present? && bitrate.present?
+    # Audio post-processing completed if we've attempted metadata extraction
+    # Even if no metadata was found, the file has been "processed"
+    medium.present?
   end
 
   # Duration in human-readable format

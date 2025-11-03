@@ -127,6 +127,9 @@ class Video < ApplicationRecord
     begin
       require 'mini_magick'
       
+      # First, extract video dimensions if not already set
+      extract_dimensions_from_ffprobe unless width.present? && height.present?
+      
       # Generate thumbnail (small, for index pages)
       generate_video_variant(:thumbnail)
       
@@ -151,6 +154,42 @@ class Video < ApplicationRecord
   end
 
   private
+
+  # Extract video dimensions from file using ffprobe
+  def extract_dimensions_from_ffprobe
+    return unless medium&.full_file_path.present? && File.exist?(medium.full_file_path)
+    
+    begin
+      require 'open3'
+      
+      # Use ffprobe to get video dimensions
+      ffprobe_cmd = [
+        'ffprobe',
+        '-v', 'error',
+        '-select_streams', 'v:0',
+        '-show_entries', 'stream=width,height',
+        '-of', 'json',
+        medium.full_file_path
+      ]
+      
+      stdout, stderr, status = Open3.capture3(*ffprobe_cmd)
+      
+      if status.success? && stdout.present?
+        data = JSON.parse(stdout)
+        streams = data['streams']
+        if streams && streams.first
+          self.width = streams.first['width']
+          self.height = streams.first['height']
+          Rails.logger.info "Extracted video dimensions: #{self.width}x#{self.height} from #{medium.full_file_path}"
+        end
+      else
+        Rails.logger.error "FFprobe failed to extract dimensions: #{stderr}"
+      end
+    rescue => e
+      Rails.logger.error "Exception extracting video dimensions: #{e.message}"
+      Rails.logger.error e.backtrace.join("\n")
+    end
+  end
 
   def generate_video_variant(variant_type)
     # Calculate size and paths based on variant type

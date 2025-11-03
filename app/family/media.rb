@@ -439,6 +439,22 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
         end
       when 'video' 
         if resource.file_exists?
+          # Check if video format is supported by browsers
+          unsupported_formats = ['video/x-ms-wmv', 'video/wmv', 'video/x-ms-asf', 'video/flv', 'video/x-flv']
+          
+          if unsupported_formats.include?(resource.content_type)
+            div do
+              para "⚠️ This video format (#{resource.content_type}) may not play in all browsers.", 
+                   style: "color: #856404; background: #fff3cd; border: 1px solid #ffeaa7; padding: 15px; border-radius: 4px; margin-bottom: 15px;"
+              
+              li ("Download the video file to play it: " +
+                  link_to("Download #{resource.original_filename}", 
+                          image_path(resource),
+                          download: resource.original_filename,
+                          style: "font-weight: bold; color: #007bff;")).html_safe
+            end
+          end
+          
           video_tag image_path(resource), controls: true, style: "max-width: 400px; max-height: 400px; margin: 0 auto; display: block;"
         else
           div "Video file not found", style: "padding: 40px; background: #f0f0f0; color: #666; border-radius: 8px; text-align: center;"
@@ -588,6 +604,69 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
           if resource.mediable.exif_data.present?
             h4 "EXIF Data"
             pre JsonFormatterService.pretty_format(resource.mediable.exif_data), 
+                style: "background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace; font-size: 12px; line-height: 1.4; border: 1px solid #e0e0e0; white-space: pre-wrap;"
+          end
+        end
+      when 'audio'
+        panel "Audio Details" do
+          attributes_table_for resource.mediable do
+            row :artist
+            row :album
+            row :album_artist
+            row :genre
+            row :year
+            row :track
+            row :composer
+            row :publisher
+            row :duration do |audio|
+              audio.duration_human
+            end
+            row :bitrate do |audio|
+              audio.bitrate_human
+            end
+            row :bpm
+            row :compilation
+          end
+        end
+      when 'video'
+        panel "Video Details" do
+          attributes_table_for resource.mediable do
+            row :width
+            row :height
+            row :dimensions do |video|
+              if video.width && video.height
+                "#{video.width} × #{video.height} pixels"
+              else
+                "Not available"
+              end
+            end
+            row :duration do |video|
+              video.duration_human
+            end
+            row :bitrate do |video|
+              video.bitrate_human
+            end
+            row :camera_make
+            row :camera_model
+            row :thumbnail_dimensions do |video|
+              if video.thumbnail_width && video.thumbnail_height
+                "#{video.thumbnail_width} × #{video.thumbnail_height} pixels (#{Video::THUMBNAIL_MAX_SIZE}px max)"
+              else
+                "Not generated"
+              end
+            end
+            row :preview_dimensions do |video|
+              if video.preview_width && video.preview_height
+                "#{video.preview_width} × #{video.preview_height} pixels (#{Video::PREVIEW_MAX_SIZE}px max)"
+              else
+                "Not generated"
+              end
+            end
+          end
+
+          if resource.mediable.metadata.present?
+            h4 "Metadata"
+            pre JsonFormatterService.pretty_format(resource.mediable.metadata), 
                 style: "background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace; font-size: 12px; line-height: 1.4; border: 1px solid #e0e0e0; white-space: pre-wrap;"
           end
         end
@@ -773,8 +852,9 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
         skipped_files = []
         failed_files = []
         
-        # Get client file paths if provided
+        # Get client file paths and dates if provided
         client_file_paths = params[:client_file_paths] || []
+        client_file_dates = params[:client_file_dates] || []
         
         # Process rejected files first (unsupported file types = skipped)
         rejected_files = all_files - filtered_files.map { |f| f[:file] }
@@ -801,17 +881,26 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
         
         # Process accepted files
         
-        filtered_files.each_with_index do |file_info, index|
+          filtered_files.each_with_index do |file_info, index|
           file = file_info[:file]
           medium_type = file_info[:medium_type]
-          # Find the client file path for this filtered file
+          # Find the client file path and date for this filtered file
           filtered_file_index = all_files.index(file)
           client_file_path = client_file_paths[filtered_file_index] if filtered_file_index
+          client_file_date = client_file_dates[filtered_file_index] if filtered_file_index
           
-          Rails.logger.info "Processing #{medium_type}: #{file.original_filename} (client path: #{client_file_path})"
+          # Debug: Log received metadata
+          if client_file_date.present?
+            client_date = Time.at(client_file_date.to_i / 1000.0)
+            Rails.logger.info "Processing #{medium_type}: #{file.original_filename} (client path: #{client_file_path})"
+            Rails.logger.info "  DEBUG: Received client_file_date: #{client_file_date} -> #{client_date}"
+          else
+            Rails.logger.info "Processing #{medium_type}: #{file.original_filename} (client path: #{client_file_path})"
+            Rails.logger.info "  DEBUG: No client_file_date received"
+          end
           
           # Disable post-processing to time upload phase separately
-          result = Medium.create_from_uploaded_file(file, current_user, medium_type, post_process: false, batch_id: batch_id, session_id: session_id, client_file_path: client_file_path)
+          result = Medium.create_from_uploaded_file(file, current_user, medium_type, post_process: false, batch_id: batch_id, session_id: session_id, client_file_path: client_file_path, client_file_date: client_file_date)
           
           if result[:success]
             imported_count += 1

@@ -1,7 +1,9 @@
 ActiveAdmin.register Audio, namespace: :family do
 
   # Permitted parameters (Audio-specific attributes only)
-  permit_params :title, :description, :duration, :bitrate, :artist, :album, :genre
+  permit_params :title, :description, :duration, :bitrate, :artist, :album, :genre,
+                :year, :track, :comment, :album_artist, :composer, :disc_number,
+                :bpm, :compilation, :publisher, :copyright, :isrc
 
   # Index page configuration
   index do
@@ -58,9 +60,16 @@ ActiveAdmin.register Audio, namespace: :family do
   filter :title
   filter :artist
   filter :album
+  filter :album_artist
   filter :genre
+  filter :composer
+  filter :year
+  filter :track
   filter :duration
   filter :bitrate
+  filter :bpm
+  filter :compilation
+  filter :publisher
   filter :created_at
 
   # Show page configuration
@@ -80,7 +89,18 @@ ActiveAdmin.register Audio, namespace: :family do
       end
       row :artist
       row :album
+      row :album_artist
       row :genre
+      row :year
+      row :track
+      row :comment
+      row :composer
+      row :disc_number
+      row :publisher
+      row :copyright
+      row :isrc
+      row :bpm
+      row :compilation
       row "Duration" do |audio|
         audio.duration_human
       end
@@ -128,6 +148,14 @@ ActiveAdmin.register Audio, namespace: :family do
       row :created_at
       row :updated_at
     end
+
+    # Raw metadata panel
+    if resource.metadata.present?
+      panel "Raw Metadata" do
+        pre JsonFormatterService.pretty_format(resource.metadata), 
+            style: "background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace; font-size: 12px; line-height: 1.4; border: 1px solid #e0e0e0; white-space: pre-wrap;"
+      end
+    end
   end
 
   # Form configuration
@@ -137,10 +165,27 @@ ActiveAdmin.register Audio, namespace: :family do
       f.input :description
     end
 
-    f.inputs "Metadata" do
+    f.inputs "Core Metadata" do
       f.input :artist
       f.input :album
+      f.input :album_artist
       f.input :genre
+      f.input :year
+      f.input :track
+      f.input :comment
+    end
+    
+    f.inputs "Extended Metadata" do
+      f.input :composer
+      f.input :disc_number
+      f.input :publisher
+      f.input :copyright
+      f.input :isrc
+      f.input :bpm
+      f.input :compilation
+    end
+    
+    f.inputs "Technical Info" do
       f.input :duration
       f.input :bitrate
     end
