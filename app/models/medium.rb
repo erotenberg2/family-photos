@@ -1224,6 +1224,74 @@ class Medium < ApplicationRecord
     final_result
   end
 
+  # Version Management Methods
+  
+  # Get all versions for this medium
+  def version_list
+    versions || []
+  end
+  
+  # Add a new version to this medium
+  # Called by mediable types when they create a modified version
+  # @param original_file_path [String] Path to the temporary modified file
+  # @param description [String] Description of what makes this version different
+  # @param options [Hash] Additional options
+  # @return [Boolean] Success or failure
+  def add_version(original_file_path, description, options = {})
+    return false unless original_file_path.present? && File.exist?(original_file_path)
+    return false unless description.present?
+    
+    versions_folder = versions_folder_path
+    
+    # Create versions folder if it doesn't exist
+    unless Dir.exist?(versions_folder)
+      FileUtils.mkdir_p(versions_folder)
+    end
+    
+    # Generate version filename
+    version_number = version_list.length + 1
+    original_ext = File.extname(current_filename)
+    version_filename = "v#{version_number}_#{description.parameterize}#{original_ext}"
+    version_path = File.join(versions_folder, version_filename)
+    
+    # Move the original file to versions
+    begin
+      FileUtils.mv(original_file_path, version_path)
+      
+      # Add version entry to database
+      now = Time.current.iso8601
+      version_entry = {
+        'filename' => version_filename,
+        'description' => description,
+        'created_at' => now,
+        'modified_at' => now
+      }
+      
+      current_versions = version_list
+      current_versions << version_entry
+      
+      update_columns(versions: current_versions)
+      
+      Rails.logger.info "Added version: #{version_filename} - #{description}"
+      true
+    rescue => e
+      Rails.logger.error "Failed to add version: #{e.message}"
+      false
+    end
+  end
+  
+  # Get the path to a specific version file
+  def version_file_path(version_filename)
+    return nil unless version_filename.present?
+    File.join(versions_folder_path, version_filename)
+  end
+  
+  # Check if a version file exists
+  def version_exists?(version_filename)
+    path = version_file_path(version_filename)
+    path.present? && File.exist?(path)
+  end
+
 
   private
 
@@ -1413,76 +1481,6 @@ class Medium < ApplicationRecord
       false
     end
   end
-
-  # Version Management Methods
-  
-  # Get all versions for this medium
-  def version_list
-    versions || []
-  end
-  
-  # Add a new version to this medium
-  # Called by mediable types when they create a modified version
-  # @param original_file_path [String] Path to the temporary modified file
-  # @param description [String] Description of what makes this version different
-  # @param options [Hash] Additional options
-  # @return [Boolean] Success or failure
-  def add_version(original_file_path, description, options = {})
-    return false unless original_file_path.present? && File.exist?(original_file_path)
-    return false unless description.present?
-    
-    versions_folder = versions_folder_path
-    
-    # Create versions folder if it doesn't exist
-    unless Dir.exist?(versions_folder)
-      FileUtils.mkdir_p(versions_folder)
-    end
-    
-    # Generate version filename
-    version_number = version_list.length + 1
-    original_ext = File.extname(current_filename)
-    version_filename = "v#{version_number}_#{description.parameterize}#{original_ext}"
-    version_path = File.join(versions_folder, version_filename)
-    
-    # Move the original file to versions
-    begin
-      FileUtils.mv(original_file_path, version_path)
-      
-      # Add version entry to database
-      now = Time.current.iso8601
-      version_entry = {
-        'filename' => version_filename,
-        'description' => description,
-        'created_at' => now,
-        'modified_at' => now
-      }
-      
-      current_versions = version_list
-      current_versions << version_entry
-      
-      update_columns(versions: current_versions)
-      
-      Rails.logger.info "Added version: #{version_filename} - #{description}"
-      true
-    rescue => e
-      Rails.logger.error "Failed to add version: #{e.message}"
-      false
-    end
-  end
-  
-  # Get the path to a specific version file
-  def version_file_path(version_filename)
-    return nil unless version_filename.present?
-    File.join(versions_folder_path, version_filename)
-  end
-  
-  # Check if a version file exists
-  def version_exists?(version_filename)
-    path = version_file_path(version_filename)
-    path.present? && File.exist?(path)
-  end
-
-  private
 
   # Validation for descriptive_name (used in filename)
   def descriptive_name_contains_no_illegal_characters
