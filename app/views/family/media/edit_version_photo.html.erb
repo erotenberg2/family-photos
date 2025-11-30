@@ -176,13 +176,30 @@
     }
 
     // Apply brightness and contrast filters to preview
+    // Match ImageMagick brightness-contrast behavior
     function applyFilters() {
       const img = document.getElementById('image-preview');
       const brightness = currentBrightness;
       const contrast = currentContrast;
       
-      // CSS filters for preview (ImageMagick will handle actual processing on save)
-      img.style.filter = `brightness(${100 + brightness * 0.5}%) contrast(${100 + contrast * 0.5}%)`;
+      // Contrast: -100 to +100 maps to 0% to 200% (works well, user confirmed)
+      const contrastPercent = 100 + contrast;
+      
+      // Brightness: -100 maps to 0% (black, works well), +100 needs to be very extreme (pure white)
+      // Use non-linear mapping for positive values to match ImageMagick's extreme white at +100
+      let brightnessPercent;
+      if (brightness <= 0) {
+        // Linear mapping for negative values: -100 → 0%, 0 → 100%
+        brightnessPercent = 100 + brightness;
+      } else {
+        // Non-linear mapping for positive values: make +100 appear as pure white
+        // Using quadratic formula: brightness^2 / 100 to make it more extreme at high values
+        // +100 → ~600-700% brightness to match ImageMagick's pure white
+        brightnessPercent = 100 + brightness + (brightness * brightness / 20);  // 0 → 100%, +100 → 600%
+      }
+      
+      // CSS filters for preview (should match what ImageMagick will apply)
+      img.style.filter = `brightness(${brightnessPercent}%) contrast(${contrastPercent}%)`;
     }
 
     // Crop mode functionality

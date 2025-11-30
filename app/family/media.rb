@@ -1411,9 +1411,16 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
         contrast = params[:contrast].present? ? params[:contrast].to_f : 0
         
         if brightness != 0 || contrast != 0
+          # Scale down brightness to ImageMagick: +100 on-screen → +80 in ImageMagick
+          # Adjust brightness_scale_factor (0.8 = 80% of slider value) to tune the mapping
+          brightness_scale_factor = 0.8
+          
+          # Apply scaling to positive brightness values only (negative values stay linear)
+          imagemagick_brightness = brightness < 0 ? brightness : brightness * brightness_scale_factor
+          
           # brightness-contrast: first value is brightness (-100 to +100), second is contrast (-100 to +100)
-          image.brightness_contrast("#{brightness}x#{contrast}")
-          Rails.logger.info "Applied brightness: #{brightness}, contrast: #{contrast}"
+          image.brightness_contrast("#{imagemagick_brightness}x#{contrast}")
+          Rails.logger.info "Applied brightness: #{imagemagick_brightness} (from slider: #{brightness}), contrast: #{contrast}"
         end
         
         # Save the edited image
