@@ -594,12 +594,29 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
               actions << link_to("Download", version_family_medium_path(resource, filename: version_filename),
                 style: "margin-right: 10px;")
               
+              # Edit action - opens in popup
+              edit_url = edit_version_family_medium_path(resource, filename: version_filename)
+              actions << link_to("Edit", "#",
+                onclick: "window.open('#{edit_url}', 'editVersion', 'width=900,height=700,scrollbars=yes,resizable=yes'); return false;",
+                style: "margin-right: 10px;")
+              
               unless is_primary
                 actions << link_to("Make primary", make_primary_family_medium_path(resource, version_filename: version_filename),
                   method: :post,
                   confirm: "Set this version as the primary version?",
                   style: "margin-right: 10px;")
               end
+              
+              # Delete action
+              children_count = resource.version_children(version_filename).length
+              confirm_msg = if children_count > 0
+                "Are you sure you want to delete this version? #{children_count} child version(s) will inherit this version's parent."
+              else
+                "Are you sure you want to delete this version?"
+              end
+              actions << link_to("Delete", delete_version_family_medium_path(resource, filename: version_filename),
+                data: { method: :delete, confirm: confirm_msg },
+                style: "color: red; margin-left: 10px;")
             else
               actions << span("File not found", style: "color: #999;")
             end
@@ -969,6 +986,173 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
     end
   end
 
+  # Serve version file for display (inline, not download)
+  member_action :version_image, method: :get do
+    medium = resource
+    filename = params[:filename]
+    
+    if filename.present?
+      versions_folder = medium.versions_folder_path
+      file_path = File.join(versions_folder, filename)
+      
+      if File.exist?(file_path)
+        send_file(file_path, 
+                  type: medium.content_type, 
+                  disposition: 'inline',
+                  filename: filename)
+      else
+        head :not_found
+      end
+    else
+      head :not_found
+    end
+  end
+
+  # Edit a version
+  member_action :edit_version, method: :get do
+    medium = resource
+    version_filename = params[:filename]
+    
+    unless version_filename.present?
+      redirect_to family_medium_path(medium), alert: "No version filename provided"
+      return
+    end
+    
+    unless medium.version_exists?(version_filename)
+      redirect_to family_medium_path(medium), alert: "Version file not found"
+      return
+    end
+    
+    @medium = medium
+    @version_filename = version_filename
+    @version_file_path = medium.version_file_path(version_filename)
+    @is_primary = medium.read_attribute(:primary) == version_filename
+    
+    # Render different views based on medium type
+    case medium.medium_type
+    when 'photo'
+      render 'edit_version_photo', layout: 'application'
+    when 'video'
+      render 'edit_version_video', layout: 'application'
+    when 'audio'
+      render 'edit_version_audio', layout: 'application'
+    else
+      redirect_to family_medium_path(medium), alert: "Unknown media type"
+    end
+  end
+
+  # Update a version (save edits)
+  member_action :update_version, method: :post do
+    medium = resource
+    version_filename = params[:filename]
+    
+    unless version_filename.present?
+      redirect_to family_medium_path(medium), alert: "No version filename provided"
+      return
+    end
+    
+    unless medium.version_exists?(version_filename)
+      redirect_to family_medium_path(medium), alert: "Version file not found"
+      return
+    end
+    
+    @medium = medium
+    @version_filename = version_filename
+    @is_primary = medium.read_attribute(:primary) == version_filename
+    
+    case medium.medium_type
+    when 'photo'
+      # Process photo edits (cropping, brightness, contrast)
+      process_photo_edits(medium, version_filename, params)
+      return  # process_photo_edits handles the response
+    when 'video'
+      # Placeholder for video
+      render json: { success: false, message: "Video editing not yet implemented" }, status: :not_implemented
+    when 'audio'
+      # Placeholder for audio
+      render json: { success: false, message: "Audio editing not yet implemented" }, status: :not_implemented
+    else
+      render json: { success: false, message: "Unknown media type" }, status: :bad_request
+    end
+  end
+
+  # Delete a version
+  member_action :delete_version, method: :delete do
+    medium = resource
+    version_filename = params[:filename]
+    
+    unless version_filename.present?
+      redirect_to family_medium_path(medium), alert: "No version filename provided"
+      return
+    end
+    
+    # Find the version in the versions list
+    version_list = medium.version_list
+    version_to_delete = version_list.find { |v| v['filename'] == version_filename }
+    
+    unless version_to_delete
+      redirect_to family_medium_path(medium), alert: "Version not found in versions list"
+      return
+    end
+    
+    begin
+      # Get children of this version
+      children = medium.version_children(version_filename)
+      parent_of_deleted = version_to_delete['parent']  # What the deleted version's parent is
+      
+      # Check if this version is primary
+      is_primary = medium.read_attribute(:primary) == version_filename
+      
+      # Update children to inherit the deleted version's parent and remove the deleted version
+      updated_versions = version_list.map do |v|
+        if v['filename'] == version_filename
+          nil  # Mark for deletion
+        elsif v['parent'] == version_filename
+          # This is a child of the deleted version - update its parent
+          v.merge('parent' => parent_of_deleted)
+        else
+          v
+        end
+      end.compact  # Remove nil entries (the deleted version)
+      
+      # Update both versions and primary in a single transaction
+      update_hash = { versions: updated_versions }
+      update_hash[:primary] = nil if is_primary
+      
+      medium.update!(update_hash)
+      
+      if children.any?
+        Rails.logger.info "Updated #{children.length} child version(s) to inherit parent: #{parent_of_deleted || 'root'}"
+      end
+      
+      if is_primary
+        Rails.logger.info "Reset primary to null (deleted version was primary)"
+      end
+      
+      # Delete the version file from disk
+      version_file_path = medium.version_file_path(version_filename)
+      if version_file_path.present? && File.exist?(version_file_path)
+        File.delete(version_file_path)
+        Rails.logger.info "Deleted version file: #{version_file_path}"
+      end
+      
+      # Sync versions.json happens automatically via after_save callback
+      # If primary was reset and this was a photo/video, regenerate thumbnails
+      if is_primary && (medium.medium_type == 'photo' || medium.medium_type == 'video')
+        if medium.mediable&.respond_to?(:generate_thumbnail)
+          medium.mediable.generate_thumbnail
+          Rails.logger.info "Regenerated thumbnails/previews after primary version deletion"
+        end
+      end
+      
+      redirect_to family_medium_path(medium), notice: "Version deleted successfully#{children.any? ? " (#{children.length} child version(s) updated)" : ""}"
+    rescue => e
+      Rails.logger.error "Failed to delete version: #{e.message}"
+      Rails.logger.error e.backtrace.join("\n")
+      redirect_to family_medium_path(medium), alert: "Error deleting version: #{e.message}"
+    end
+  end
+
   # Set a version (or root) as the primary version
   member_action :make_primary, method: :post do
     medium = resource
@@ -1192,6 +1376,67 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
     end
 
     private
+
+    def process_photo_edits(medium, version_filename, params)
+      version_file_path = medium.version_file_path(version_filename)
+      
+      unless version_file_path.present? && File.exist?(version_file_path)
+        render json: { success: false, error: "Version file not found" }, status: :not_found
+        return
+      end
+      
+      begin
+        require 'mini_magick'
+        
+        image = MiniMagick::Image.open(version_file_path)
+        original_image = image.dup
+        
+        # Apply cropping if provided
+        if params[:crop_x].present? && params[:crop_y].present? && 
+           params[:crop_width].present? && params[:crop_height].present?
+          x = params[:crop_x].to_i
+          y = params[:crop_y].to_i
+          width = params[:crop_width].to_i
+          height = params[:crop_height].to_i
+          
+          if width > 0 && height > 0
+            image.crop("#{width}x#{height}+#{x}+#{y}")
+            Rails.logger.info "Applied crop: #{width}x#{height} at (#{x},#{y})"
+          end
+        end
+        
+        # Apply brightness and contrast adjustments
+        # ImageMagick brightness-contrast: brightness ranges from -100 to +100, contrast from -100 to +100
+        brightness = params[:brightness].present? ? params[:brightness].to_f : 0
+        contrast = params[:contrast].present? ? params[:contrast].to_f : 0
+        
+        if brightness != 0 || contrast != 0
+          # brightness-contrast: first value is brightness (-100 to +100), second is contrast (-100 to +100)
+          image.brightness_contrast("#{brightness}x#{contrast}")
+          Rails.logger.info "Applied brightness: #{brightness}, contrast: #{contrast}"
+        end
+        
+        # Save the edited image
+        image.write(version_file_path)
+        
+        Rails.logger.info "Saved edited version: #{version_file_path}"
+        
+        # If this version is primary, regenerate thumbnails and previews
+        if medium.read_attribute(:primary) == version_filename
+          Rails.logger.info "Version is primary, regenerating thumbnails and previews"
+          if medium.mediable&.respond_to?(:generate_thumbnail)
+            medium.mediable.generate_thumbnail
+          end
+        end
+        
+        # Close popup and refresh parent
+        render json: { success: true, message: "Version updated successfully" }, status: :ok
+      rescue => e
+        Rails.logger.error "Failed to process photo edits: #{e.message}"
+        Rails.logger.error e.backtrace.join("\n")
+        render json: { success: false, error: e.message }, status: :unprocessable_entity
+      end
+    end
 
     def generate_filename_from_datetime_and_descriptive_name(medium, descriptive_name)
       # Extract the timestamp from the current filename (part before the first dash)

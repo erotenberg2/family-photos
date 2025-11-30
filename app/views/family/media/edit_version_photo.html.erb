@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Edit Version: <%= @version_filename %></title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <%= csrf_meta_tags %>
+  <%= stylesheet_link_tag "active_admin", "data-turbo-track": "reload" %>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    .edit-container {
+      max-width: 1200px;
+      margin: 0 auto;
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    h1 {
+      margin-top: 0;
+      color: #333;
+    }
+    .image-container {
+      text-align: center;
+      margin: 20px 0;
+      position: relative;
+      display: inline-block;
+    }
+    #image-preview {
+      max-width: 100%;
+      max-height: 500px;
+      border: 2px solid #ddd;
+      border-radius: 4px;
+    }
+    .controls {
+      margin: 20px 0;
+    }
+    .control-group {
+      margin: 15px 0;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: bold;
+      color: #555;
+    }
+    input[type="range"] {
+      width: 100%;
+      max-width: 400px;
+    }
+    .range-value {
+      display: inline-block;
+      margin-left: 10px;
+      min-width: 50px;
+      font-weight: bold;
+      color: #666;
+    }
+    .button-group {
+      margin-top: 30px;
+      text-align: right;
+    }
+    button {
+      padding: 10px 20px;
+      margin-left: 10px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: bold;
+    }
+    .btn-primary {
+      background: #007bff;
+      color: white;
+    }
+    .btn-primary:hover {
+      background: #0056b3;
+    }
+    .btn-secondary {
+      background: #6c757d;
+      color: white;
+    }
+    .btn-secondary:hover {
+      background: #545b62;
+    }
+    .cropping-area {
+      position: absolute;
+      border: 2px dashed #007bff;
+      background: rgba(0, 123, 255, 0.1);
+      cursor: move;
+      display: none;
+    }
+    .crop-info {
+      margin-top: 10px;
+      font-size: 12px;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <div class="edit-container">
+    <h1>Edit Version: <%= File.basename(@version_filename, File.extname(@version_filename)) %></h1>
+    
+    <div class="image-container">
+      <img id="image-preview" src="<%= version_image_family_medium_path(@medium, filename: @version_filename) %>" alt="Preview">
+      <div id="cropping-area" class="cropping-area"></div>
+    </div>
+    
+    <div class="controls">
+      <div class="control-group">
+        <button type="button" onclick="enableCropMode()" style="background: #28a745; color: white; padding: 8px 16px;">
+          Enable Cropping
+        </button>
+        <button type="button" onclick="disableCropMode()" style="background: #dc3545; color: white; padding: 8px 16px; margin-left: 10px;">
+          Cancel Crop
+        </button>
+        <div class="crop-info" id="crop-info"></div>
+      </div>
+      
+      <div class="control-group">
+        <label>
+          Brightness
+          <span class="range-value" id="brightness-value">0</span>
+        </label>
+        <input type="range" id="brightness" min="-100" max="100" value="0" oninput="updateBrightness(this.value)">
+      </div>
+      
+      <div class="control-group">
+        <label>
+          Contrast
+          <span class="range-value" id="contrast-value">0</span>
+        </label>
+        <input type="range" id="contrast" min="-100" max="100" value="0" oninput="updateContrast(this.value)">
+      </div>
+    </div>
+    
+    <div class="button-group">
+      <button type="button" class="btn-secondary" onclick="handleCancel()">Cancel</button>
+      <button type="button" class="btn-primary" onclick="handleSave()">Save Changes</button>
+    </div>
+  </div>
+
+  <script>
+    let hasEdits = false;
+    let cropMode = false;
+    let cropStartX = 0;
+    let cropStartY = 0;
+    let cropArea = null;
+    let isDragging = false;
+    let originalImage = null;
+    let currentBrightness = 0;
+    let currentContrast = 0;
+
+    // Track if there are unsaved edits
+    function markAsEdited() {
+      hasEdits = true;
+    }
+
+    // Brightness adjustment
+    function updateBrightness(value) {
+      currentBrightness = parseInt(value);
+      document.getElementById('brightness-value').textContent = value;
+      applyFilters();
+      markAsEdited();
+    }
+
+    // Contrast adjustment
+    function updateContrast(value) {
+      currentContrast = parseInt(value);
+      document.getElementById('contrast-value').textContent = value;
+      applyFilters();
+      markAsEdited();
+    }
+
+    // Apply brightness and contrast filters to preview
+    function applyFilters() {
+      const img = document.getElementById('image-preview');
+      const brightness = currentBrightness;
+      const contrast = currentContrast;
+      
+      // CSS filters for preview (ImageMagick will handle actual processing on save)
+      img.style.filter = `brightness(${100 + brightness * 0.5}%) contrast(${100 + contrast * 0.5}%)`;
+    }
+
+    // Crop mode functionality
+    function enableCropMode() {
+      cropMode = true;
+      const img = document.getElementById('image-preview');
+      const container = img.parentElement;
+      
+      if (!cropArea) {
+        cropArea = document.getElementById('cropping-area');
+      }
+      
+      container.style.position = 'relative';
+      img.style.cursor = 'crosshair';
+      
+      img.onmousedown = startCrop;
+      document.onmousemove = dragCrop;
+      document.onmouseup = endCrop;
+    }
+
+    function disableCropMode() {
+      cropMode = false;
+      const img = document.getElementById('image-preview');
+      img.style.cursor = 'default';
+      img.onmousedown = null;
+      document.onmousemove = null;
+      document.onmouseup = null;
+      
+      if (cropArea) {
+        cropArea.style.display = 'none';
+      }
+      
+      document.getElementById('crop-info').textContent = '';
+    }
+
+    function startCrop(e) {
+      if (!cropMode) return;
+      
+      isDragging = true;
+      const img = document.getElementById('image-preview');
+      const rect = img.getBoundingClientRect();
+      
+      cropStartX = e.clientX - rect.left;
+      cropStartY = e.clientY - rect.top;
+      
+      cropArea.style.display = 'block';
+      cropArea.style.left = cropStartX + 'px';
+      cropArea.style.top = cropStartY + 'px';
+      cropArea.style.width = '0px';
+      cropArea.style.height = '0px';
+      
+      markAsEdited();
+    }
+
+    function dragCrop(e) {
+      if (!isDragging || !cropMode) return;
+      
+      const img = document.getElementById('image-preview');
+      const rect = img.getBoundingClientRect();
+      const currentX = e.clientX - rect.left;
+      const currentY = e.clientY - rect.top;
+      
+      const width = Math.abs(currentX - cropStartX);
+      const height = Math.abs(currentY - cropStartY);
+      const left = Math.min(currentX, cropStartX);
+      const top = Math.min(currentY, cropStartY);
+      
+      cropArea.style.left = left + 'px';
+      cropArea.style.top = top + 'px';
+      cropArea.style.width = width + 'px';
+      cropArea.style.height = height + 'px';
+      
+      // Update crop info
+      const scaleX = img.naturalWidth / img.width;
+      const scaleY = img.naturalHeight / img.height;
+      document.getElementById('crop-info').textContent = 
+        `Crop: ${Math.round(left * scaleX)}, ${Math.round(top * scaleY)}, ${Math.round(width * scaleX)}x${Math.round(height * scaleY)}`;
+    }
+
+    function endCrop(e) {
+      isDragging = false;
+    }
+
+    // Save changes
+    function handleSave() {
+      const formData = new FormData();
+      formData.append('filename', '<%= @version_filename %>');
+      
+      // Add brightness and contrast
+      formData.append('brightness', currentBrightness);
+      formData.append('contrast', currentContrast);
+      
+      // Add crop coordinates if crop area is visible
+      if (cropArea && cropArea.style.display !== 'none' && 
+          parseInt(cropArea.style.width) > 0 && parseInt(cropArea.style.height) > 0) {
+        const img = document.getElementById('image-preview');
+        const scaleX = img.naturalWidth / img.width;
+        const scaleY = img.naturalHeight / img.height;
+        
+        // Get crop area position relative to the image
+        const cropLeft = parseInt(cropArea.style.left);
+        const cropTop = parseInt(cropArea.style.top);
+        const cropWidth = parseInt(cropArea.style.width);
+        const cropHeight = parseInt(cropArea.style.height);
+        
+        // Convert to natural image coordinates
+        const x = Math.max(0, Math.round(cropLeft * scaleX));
+        const y = Math.max(0, Math.round(cropTop * scaleY));
+        const width = Math.min(img.naturalWidth - x, Math.round(cropWidth * scaleX));
+        const height = Math.min(img.naturalHeight - y, Math.round(cropHeight * scaleY));
+        
+        if (width > 0 && height > 0) {
+          formData.append('crop_x', x);
+          formData.append('crop_y', y);
+          formData.append('crop_width', width);
+          formData.append('crop_height', height);
+        }
+      }
+      
+      // Get CSRF token from meta tag
+      const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+      if (csrfToken) {
+        formData.append('authenticity_token', csrfToken);
+      }
+      
+      fetch('<%= update_version_family_medium_path(@medium, filename: @version_filename) %>', {
+        method: 'POST',
+        body: formData,
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest'
+        }
+      })
+      .then(response => {
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return response.json();
+      })
+      .then(data => {
+        if (data.success) {
+          if (window.opener) {
+            window.opener.location.reload();
+          }
+          window.close();
+        } else {
+          alert('Error saving changes: ' + (data.error || data.message || 'Unknown error'));
+        }
+      })
+      .catch(error => {
+        console.error('Error:', error);
+        alert('Error saving changes. Please try again.');
+      });
+    }
+
+    // Cancel with confirmation if there are edits
+    function handleCancel() {
+      if (hasEdits) {
+        if (confirm('Are you sure you want to throw away your edits?')) {
+          if (window.opener) {
+            window.close();
+          } else {
+            window.location.href = '<%= family_medium_path(@medium) %>';
+          }
+        }
+      } else {
+        if (window.opener) {
+          window.close();
+        } else {
+          window.location.href = '<%= family_medium_path(@medium) %>';
+        }
+      }
+    }
+  </script>
+</body>
+</html>
+

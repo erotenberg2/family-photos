@@ -60,7 +60,7 @@ class Medium < ApplicationRecord
   # Callbacks for file operations
   before_update :rename_file_on_disk, if: :current_filename_changed?
   after_update :rename_file_if_datetime_changed, if: :effective_datetime_changed?
-  after_update :regenerate_thumbnails_for_primary, if: :primary_changed?
+  after_update :regenerate_thumbnails_for_primary, if: :saved_change_to_primary?
   after_save :sync_versions_json, if: -> { saved_change_to_versions? || saved_change_to_primary? }
   before_destroy :store_mediable_info
   after_destroy :cleanup_thumbnails_and_previews
@@ -1458,28 +1458,38 @@ class Medium < ApplicationRecord
 
   # Regenerate thumbnails and previews when primary changes
   def regenerate_thumbnails_for_primary
+    Rails.logger.info "=== regenerate_thumbnails_for_primary called ==="
+    Rails.logger.info "  primary: #{read_attribute(:primary) || 'nil (root)'}"
+    Rails.logger.info "  primary_file_exists?: #{primary_file_exists?}"
+    
     return unless primary_file_exists?
     
     # Delete old thumbnails/previews (these are based on main filename)
+    Rails.logger.info "  Cleaning up old thumbnails/previews"
     cleanup_thumbnails_and_previews
     
     # Regenerate from primary file
-    # TODO: Photo/Video models need to be updated to check medium.primary_file_path
-    # when generating thumbnails. For now, this will trigger regeneration.
+    # Photo/Video models use source_file_path_for_thumbnails which uses primary_file_path
     case medium_type
     when 'photo'
       if mediable.present?
-        # Force regeneration - Photo model will need to use primary_file_path
+        Rails.logger.info "  Regenerating photo thumbnails from: #{source_file_path_for_thumbnails}"
         mediable.generate_thumbnail
+      else
+        Rails.logger.warn "  No mediable (Photo) found for medium #{id}"
       end
     when 'video'
       if mediable.present?
-        # Force regeneration - Video model will need to use primary_file_path
+        Rails.logger.info "  Regenerating video thumbnails from: #{source_file_path_for_thumbnails}"
         mediable.generate_thumbnail
+      else
+        Rails.logger.warn "  No mediable (Video) found for medium #{id}"
       end
+    else
+      Rails.logger.info "  Medium type #{medium_type} does not require thumbnail regeneration"
     end
     
-    Rails.logger.info "Regenerated thumbnails/previews for primary: #{read_attribute(:primary) || 'root'}"
+    Rails.logger.info "✅ Regenerated thumbnails/previews for primary: #{read_attribute(:primary) || 'root'}"
   end
 
   # Extract last modified time from uploaded file

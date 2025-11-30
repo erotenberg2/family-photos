@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Edit Version: <%= @version_filename %></title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <%= csrf_meta_tags %>
+  <%= stylesheet_link_tag "active_admin", "data-turbo-track": "reload" %>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    .edit-container {
+      max-width: 800px;
+      margin: 0 auto;
+      background: white;
+      padding: 40px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      text-align: center;
+    }
+    h1 {
+      margin-top: 0;
+      color: #333;
+    }
+    .placeholder {
+      padding: 40px;
+      background: #f8f9fa;
+      border-radius: 8px;
+      color: #666;
+      margin: 20px 0;
+    }
+    .button-group {
+      margin-top: 30px;
+    }
+    button {
+      padding: 10px 20px;
+      margin-left: 10px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: bold;
+    }
+    .btn-secondary {
+      background: #6c757d;
+      color: white;
+    }
+    .btn-secondary:hover {
+      background: #545b62;
+    }
+  </style>
+</head>
+<body>
+  <div class="edit-container">
+    <h1>Edit Version: <%= File.basename(@version_filename, File.extname(@version_filename)) %></h1>
+    
+    <div class="placeholder">
+      <p style="font-size: 18px; margin-bottom: 10px;">🎵</p>
+      <p>Audio editing is not yet implemented.</p>
+    </div>
+    
+    <div class="button-group">
+      <button type="button" class="btn-secondary" onclick="window.close()">Close</button>
+    </div>
+  </div>
+</body>
+</html>
+
