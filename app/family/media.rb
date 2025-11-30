@@ -536,126 +536,335 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
         HTML
       end
       
-      # Root version table (always shown, single row)
-      root_is_primary = resource.read_attribute(:primary).nil?
-      table_for [resource], class: "root-version-table" do
-        column "Primary" do |medium|
-          if root_is_primary
-            raw '<span style="color: #28a745; font-size: 18px; font-weight: bold;">✓</span>'
-          else
-            "—"
-          end
-        end
-        column "Root version" do |medium|
-          medium.descriptive_name.presence || File.basename(medium.current_filename, File.extname(medium.current_filename))
-        end
-        column "Description" do |medium|
-          medium.read_attribute(:description).presence || "Original file"
-        end
-        column "effective_datetime" do |medium|
-          if medium.effective_datetime
-            medium.effective_datetime.strftime("%Y-%m-%d %H:%M:%S")
-          else
-            "—"
-          end
-        end
-        column "Actions" do |medium|
-          unless root_is_primary
-            link_to("Make primary", make_primary_family_medium_path(medium, version_filename: nil),
-              method: :post,
-              confirm: "Set this root file as the primary version?",
-              style: "margin-right: 10px;")
-          end
-        end
+      # Add CSS and JavaScript for hierarchical view
+      content_for :head do
+        raw <<~HTML
+          <style>
+            .version-hierarchy-item {
+              margin: 5px 0;
+              padding: 8px;
+              border: 1px solid #ddd;
+              border-radius: 4px;
+              background: #fff;
+            }
+            .version-hierarchy-children {
+              margin-left: 30px;
+              margin-top: 5px;
+              display: none;
+            }
+            .version-hierarchy-children.expanded {
+              display: block;
+            }
+            .version-toggle {
+              cursor: pointer;
+              user-select: none;
+              display: inline-block;
+              width: 20px;
+              text-align: center;
+              font-weight: bold;
+              margin-right: 5px;
+            }
+            .version-hierarchy-row {
+              display: flex;
+              align-items: center;
+              padding: 8px 0;
+              gap: 10px;
+            }
+            .version-hierarchy-row > *:first-child {
+              flex: 0 0 30px;
+            }
+            .version-hierarchy-row > *:nth-child(2) {
+              flex: 0 0 50px;
+            }
+            .version-hierarchy-row > *:nth-child(3) {
+              flex: 1 1 20%;
+            }
+            .version-hierarchy-row > *:nth-child(4) {
+              flex: 1 1 25%;
+            }
+            .version-hierarchy-row > *:nth-child(5) {
+              flex: 1 1 15%;
+            }
+            .version-hierarchy-row > *:nth-child(6) {
+              flex: 1 1 30%;
+            }
+            .version-hierarchy-header {
+              display: flex;
+              font-weight: bold;
+              padding: 8px 0;
+              border-bottom: 2px solid #ddd;
+              margin-bottom: 5px;
+              gap: 10px;
+            }
+            .version-hierarchy-header > *:first-child {
+              flex: 0 0 30px;
+            }
+            .version-hierarchy-header > *:nth-child(2) {
+              flex: 0 0 50px;
+            }
+            .version-hierarchy-header > *:nth-child(3) {
+              flex: 1 1 20%;
+            }
+            .version-hierarchy-header > *:nth-child(4) {
+              flex: 1 1 25%;
+            }
+            .version-hierarchy-header > *:nth-child(5) {
+              flex: 1 1 15%;
+            }
+            .version-hierarchy-header > *:nth-child(6) {
+              flex: 1 1 30%;
+            }
+          </style>
+          <script>
+            function toggleVersionChildren(element) {
+              const item = element.closest('.version-hierarchy-item');
+              const children = item ? item.querySelector('.version-hierarchy-children') : null;
+              if (children) {
+                children.classList.toggle('expanded');
+                element.textContent = children.classList.contains('expanded') ? '−' : '+';
+              }
+            }
+          </script>
+        HTML
       end
       
+      # Prepare data
+      root_is_primary = resource.read_attribute(:primary).nil?
       versions_list = resource.version_list.sort_by { |v| v['created_at'] }
       
-      if versions_list.any?
-        table_for versions_list do
-          column "Primary" do |version|
-            version_filename = version['filename']
-            is_primary = resource.read_attribute(:primary) == version_filename
-            if is_primary
-              raw '<span style="color: #28a745; font-size: 18px; font-weight: bold;">✓</span>'
-            else
-              "—"
-            end
+      # Helper lambda to build version actions HTML
+      build_version_actions_html = lambda do |medium, version_filename, is_primary, is_root: false|
+        actions = []
+        if is_root
+          root_is_primary = medium.read_attribute(:primary).nil?
+          if medium.version_exists?(medium.current_filename)
+            actions << link_to("Download", version_family_medium_path(medium, filename: medium.current_filename),
+              style: "margin-right: 10px;").to_s
           end
-          column "Version" do |version|
-            File.basename(version['filename'], File.extname(version['filename']))
+          unless root_is_primary
+            actions << link_to("Make primary", make_primary_family_medium_path(medium, version_filename: nil),
+              method: :post,
+              confirm: "Set this root file as the primary version?",
+              style: "margin-right: 10px;").to_s
           end
-          column "Description" do |version|
-            version['description']
-          end
-          column "Parent" do |version|
-            parent_filename = version['parent']
-            if parent_filename.present?
-              File.basename(parent_filename, File.extname(parent_filename))
-            else
-              "—"
-            end
-          end
-          column "Created" do |version|
-            if version['created_at']
-              Time.parse(version['created_at']).strftime("%Y-%m-%d %H:%M")
-            else
-              "—"
-            end
-          end
-          column "Actions" do |version|
-            version_filename = version['filename']
-            is_primary = resource.read_attribute(:primary) == version_filename
+        else
+          if medium.version_exists?(version_filename)
+            actions << link_to("Download", version_family_medium_path(medium, filename: version_filename),
+              style: "margin-right: 10px;").to_s
             
-            actions = []
-            if resource.version_exists?(version_filename)
-              actions << link_to("Download", version_family_medium_path(resource, filename: version_filename),
-                style: "margin-right: 10px;")
-              
-              # Edit action - opens in popup (routes to mediable-specific controller)
-              edit_url = case resource.medium_type
-              when 'photo'
-                edit_version_family_photo_path(resource.mediable, filename: version_filename)
-              when 'audio'
-                edit_version_family_audio_path(resource.mediable, filename: version_filename)
-              when 'video'
-                edit_version_family_video_path(resource.mediable, filename: version_filename)
-              else
-                nil
-              end
-              
-              if edit_url.present?
-                actions << link_to("Edit", "#",
-                  onclick: "window.open('#{edit_url}', 'editVersion', 'width=900,height=700,scrollbars=yes,resizable=yes'); return false;",
-                  style: "margin-right: 10px;")
-              end
-              
-              unless is_primary
-                actions << link_to("Make primary", make_primary_family_medium_path(resource, version_filename: version_filename),
-                  method: :post,
-                  confirm: "Set this version as the primary version?",
-                  style: "margin-right: 10px;")
-              end
-              
-              # Delete action
-              children_count = resource.version_children(version_filename).length
-              confirm_msg = if children_count > 0
-                "Are you sure you want to delete this version? #{children_count} child version(s) will inherit this version's parent."
-              else
-                "Are you sure you want to delete this version?"
-              end
-              actions << link_to("Delete", delete_version_family_medium_path(resource, filename: version_filename),
-                data: { method: :delete, confirm: confirm_msg },
-                style: "color: red; margin-left: 10px;")
+            # Edit action
+            edit_url = case medium.medium_type
+            when 'photo'
+              edit_version_family_photo_path(medium.mediable, filename: version_filename)
+            when 'audio'
+              edit_version_family_audio_path(medium.mediable, filename: version_filename)
+            when 'video'
+              edit_version_family_video_path(medium.mediable, filename: version_filename)
             else
-              actions << span("File not found", style: "color: #999;")
+              nil
             end
             
-            raw actions.join(" ")
+            if edit_url.present?
+              actions << link_to("Edit", "#",
+                onclick: "window.open('#{edit_url}', 'editVersion', 'width=900,height=700,scrollbars=yes,resizable=yes'); return false;",
+                style: "margin-right: 10px;").to_s
+            end
+            
+            unless is_primary
+              actions << link_to("Make primary", make_primary_family_medium_path(medium, version_filename: version_filename),
+                method: :post,
+                confirm: "Set this version as the primary version?",
+                style: "margin-right: 10px;").to_s
+            end
+            
+            # Delete action
+            children_count = medium.version_children(version_filename).length
+            confirm_msg = if children_count > 0
+              "Are you sure you want to delete this version? #{children_count} child version(s) will inherit this version's parent."
+            else
+              "Are you sure you want to delete this version?"
+            end
+            actions << link_to("Delete", delete_version_family_medium_path(medium, filename: version_filename),
+              data: { method: :delete, confirm: confirm_msg },
+              style: "color: red; margin-left: 10px;").to_s
+          else
+            actions << '<span style="color: #999;">File not found</span>'
           end
         end
-      else
-        div "No versions", style: "padding: 20px; background: #f0f0f0; color: #666; border-radius: 8px; text-align: center;"
+        actions.join(" ")
+      end
+      
+      # Helper lambda to build hierarchical version tree HTML
+      build_hierarchical_version_html = lambda do |medium, versions_list, parent_filename, level = 0|
+        html = ""
+        root_is_primary = medium.read_attribute(:primary).nil?
+        
+        if parent_filename.nil?
+          # Render root
+          children = versions_list.select { |v| v['parent'].nil? }
+          has_children = children.any?
+          
+          primary_html = root_is_primary ? '<span style="color: #28a745; font-size: 18px; font-weight: bold;">✓</span>' : "—"
+          name = medium.descriptive_name.presence || File.basename(medium.current_filename, File.extname(medium.current_filename))
+          description = medium.read_attribute(:description).presence || "Original file"
+          datetime = medium.effective_datetime ? medium.effective_datetime.strftime("%Y-%m-%d %H:%M:%S") : "—"
+          actions_html = build_version_actions_html.call(medium, nil, root_is_primary, is_root: true)
+          toggle_html = has_children ? '<span class="version-toggle" onclick="toggleVersionChildren(this);" style="cursor: pointer;">+</span>' : '<span class="version-toggle" style="color: #ccc;"> </span>'
+          
+          html << %Q{
+            <div class="version-hierarchy-item" style="margin-left: #{level * 30}px;">
+              <div class="version-hierarchy-row">
+                <div>#{toggle_html}</div>
+                <div>#{primary_html}</div>
+                <div>#{ERB::Util.html_escape(name)}</div>
+                <div>#{ERB::Util.html_escape(description)}</div>
+                <div>#{ERB::Util.html_escape(datetime)}</div>
+                <div>#{actions_html}</div>
+              </div>
+          }
+          
+          if has_children
+            html << '<div class="version-hierarchy-children">'
+            children.each do |child_version|
+              html << build_hierarchical_version_html.call(medium, versions_list, child_version['filename'], level + 1)
+            end
+            html << '</div>'
+          end
+          
+          html << '</div>'
+        else
+          # Render version
+          version = versions_list.find { |v| v['filename'] == parent_filename }
+          return "" unless version
+          
+          children = medium.version_children(parent_filename)
+          has_children = children.any?
+          is_primary = medium.read_attribute(:primary) == parent_filename
+          
+          primary_html = is_primary ? '<span style="color: #28a745; font-size: 18px; font-weight: bold;">✓</span>' : "—"
+          name = File.basename(parent_filename, File.extname(parent_filename))
+          description = version['description']
+          datetime = version['created_at'] ? Time.parse(version['created_at']).strftime("%Y-%m-%d %H:%M") : "—"
+          actions_html = build_version_actions_html.call(medium, parent_filename, is_primary)
+          toggle_html = has_children ? '<span class="version-toggle" onclick="toggleVersionChildren(this);" style="cursor: pointer;">+</span>' : '<span class="version-toggle" style="color: #ccc;"> </span>'
+          
+          html << %Q{
+            <div class="version-hierarchy-item" style="margin-left: #{level * 30}px;">
+              <div class="version-hierarchy-row">
+                <div>#{toggle_html}</div>
+                <div>#{primary_html}</div>
+                <div>#{ERB::Util.html_escape(name)}</div>
+                <div>#{ERB::Util.html_escape(description)}</div>
+                <div>#{ERB::Util.html_escape(datetime)}</div>
+                <div>#{actions_html}</div>
+              </div>
+          }
+          
+          if has_children
+            html << '<div class="version-hierarchy-children">'
+            children.each do |child_version|
+              html << build_hierarchical_version_html.call(medium, versions_list, child_version['filename'], level + 1)
+            end
+            html << '</div>'
+          end
+          
+          html << '</div>'
+        end
+        
+        html
+      end
+      
+      # Tabs
+      tabs do
+        tab "Hierarchical list" do
+          if versions_list.any? || true # Always show root
+            raw <<~HTML
+              <div class="version-hierarchy-header">
+                <div> </div>
+                <div>Primary</div>
+                <div>Version</div>
+                <div>Description</div>
+                <div>Created</div>
+                <div>Actions</div>
+              </div>
+            HTML
+            raw build_hierarchical_version_html.call(resource, versions_list, nil, 0)
+          else
+            div "No versions", style: "padding: 20px; background: #f0f0f0; color: #666; border-radius: 8px; text-align: center;"
+          end
+        end
+        
+        tab "Linear list" do
+          # Root version table
+          table_for [resource], class: "root-version-table" do
+            column "Primary" do |medium|
+              if root_is_primary
+                raw '<span style="color: #28a745; font-size: 18px; font-weight: bold;">✓</span>'
+              else
+                "—"
+              end
+            end
+            column "Root version" do |medium|
+              medium.descriptive_name.presence || File.basename(medium.current_filename, File.extname(medium.current_filename))
+            end
+            column "Description" do |medium|
+              medium.read_attribute(:description).presence || "Original file"
+            end
+            column "effective_datetime" do |medium|
+              if medium.effective_datetime
+                medium.effective_datetime.strftime("%Y-%m-%d %H:%M:%S")
+              else
+                "—"
+              end
+            end
+            column "Actions" do |medium|
+              raw build_version_actions_html.call(resource, nil, root_is_primary, is_root: true)
+            end
+          end
+          
+          # Other versions table
+          if versions_list.any?
+            table_for versions_list do
+              column "Primary" do |version|
+                version_filename = version['filename']
+                is_primary = resource.read_attribute(:primary) == version_filename
+                if is_primary
+                  raw '<span style="color: #28a745; font-size: 18px; font-weight: bold;">✓</span>'
+                else
+                  "—"
+                end
+              end
+              column "Version" do |version|
+                File.basename(version['filename'], File.extname(version['filename']))
+              end
+              column "Description" do |version|
+                version['description']
+              end
+              column "Parent" do |version|
+                parent_filename = version['parent']
+                if parent_filename.present?
+                  File.basename(parent_filename, File.extname(parent_filename))
+                else
+                  "—"
+                end
+              end
+              column "Created" do |version|
+                if version['created_at']
+                  Time.parse(version['created_at']).strftime("%Y-%m-%d %H:%M")
+                else
+                  "—"
+                end
+              end
+              column "Actions" do |version|
+                version_filename = version['filename']
+                is_primary = resource.read_attribute(:primary) == version_filename
+                raw build_version_actions_html.call(resource, version_filename, is_primary)
+              end
+            end
+          else
+            div "No versions", style: "padding: 20px; background: #f0f0f0; color: #666; border-radius: 8px; text-align: center;"
+          end
+        end
       end
     end
     # Attachments panel
@@ -679,7 +888,7 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
                 style: "margin-right: 10px;") +
               link_to("Delete", delete_attachment_family_medium_path(resource, filename: File.basename(file_path)),
                 method: :delete,
-                confirm: "Are you sure you want to delete this attachment?",
+                data: { confirm: "Are you sure you want to delete this attachment? This action cannot be undone." },
                 style: "color: red;")
             end
           end
@@ -1444,6 +1653,20 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
         end
         
         # Process accepted files
+        # IMPORTANT: all_files contains ALL files from the directory (including .cr3, .xml, etc.)
+        # filtered_files contains only valid media types (jpg, png, etc.)
+        # We pass all_files to enable detection of auxiliary files during upload
+        # NOTE: We only upload sidecar files that match a main file by base name
+        # Orphaned raw files (without matching media files) are NOT uploaded
+        
+        Rails.logger.info "🔍 [UPLOAD HANDLER] Starting file processing"
+        Rails.logger.info "  Total files in request: #{all_files.length}"
+        Rails.logger.info "  Filtered (valid media) files: #{filtered_files.length}"
+        Rails.logger.info "  All files list:"
+        all_files.each_with_index do |f, idx|
+          ext = File.extname(f.original_filename).downcase
+          Rails.logger.info "    [#{idx}] #{f.original_filename} (ext: #{ext}, type: #{f.content_type})"
+        end
         
         filtered_files.each_with_index do |file_info, index|
           file = file_info[:file]
@@ -1464,7 +1687,11 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
           end
           
           # Disable post-processing to time upload phase separately
-          result = Medium.create_from_uploaded_file(file, current_user, medium_type, post_process: false, batch_id: batch_id, session_id: session_id, client_file_path: client_file_path, client_file_date: client_file_date)
+          # Pass all_files to enable auxiliary file detection
+          Rails.logger.info "🔍 [UPLOAD HANDLER] Processing file: #{file.original_filename}"
+          Rails.logger.info "  All files count: #{all_files.length}"
+          Rails.logger.info "  All files: #{all_files.map(&:original_filename).join(', ')}"
+          result = Medium.create_from_uploaded_file(file, current_user, medium_type, post_process: false, batch_id: batch_id, session_id: session_id, client_file_path: client_file_path, client_file_date: client_file_date, all_files: all_files)
           
           if result[:success]
             imported_count += 1

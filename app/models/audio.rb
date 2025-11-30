@@ -27,6 +27,14 @@ class Audio < ApplicationRecord
     }
   end
   
+  # Define auxiliary file extensions that should be attached to audio files
+  def self.auxiliary_file_extensions
+    [
+      '.xml',  # Metadata files (XMP, iTunes, etc.)
+      '.cue'   # CUE sheets for track indexing
+    ]
+  end
+  
   # Delegate generic media attributes to Medium
   delegate :file_size, :original_filename, :current_filename, :content_type, :md5_hash,
            :uploaded_by, :user, :file_size_human, :effective_datetime,
@@ -179,5 +187,77 @@ class Audio < ApplicationRecord
   def extract_description_from_metadata
     return "" unless comment.present?
     comment.strip
+  end
+  
+  # Attach auxiliary files (XML, CUE) to this audio file by moving them to aux/attachments/
+  # Looks for auxiliary files in the same directory with matching base filename
+  def attach_auxiliary_files
+    return unless medium&.full_file_path.present?
+    
+    main_file_path = medium.full_file_path
+    main_dir = File.dirname(main_file_path)
+    main_filename = File.basename(main_file_path)
+    main_base = File.basename(main_file_path, File.extname(main_file_path))
+    
+    # Extract the original base name (after timestamp prefix if present)
+    original_base = main_base
+    if main_base =~ /^\d{8}_\d{6}-(.+)$/
+      original_base = $1
+    end
+    
+    # Get auxiliary file extensions
+    aux_extensions = self.class.auxiliary_file_extensions
+    
+    # Find matching auxiliary files in the same directory
+    aux_files = aux_extensions.flat_map do |ext|
+      patterns = [
+        File.join(main_dir, "#{main_base}#{ext}"),
+        File.join(main_dir, "#{main_base.split('-').first}-#{original_base}#{ext}"),
+        File.join(main_dir, "#{original_base}#{ext}")
+      ]
+      
+      patterns.flat_map do |pattern|
+        Dir.glob(pattern).select { |f| File.file?(f) && f != main_file_path }
+      end
+    end.uniq
+    
+    return if aux_files.empty?
+    
+    # Ensure aux folder exists
+    attachments_folder = medium.attachments_folder_path
+    return unless attachments_folder.present?
+    
+    FileUtils.mkdir_p(attachments_folder) unless Dir.exist?(attachments_folder)
+    
+    # Move auxiliary files to attachments folder
+    aux_files.each do |aux_file|
+      aux_filename = File.basename(aux_file)
+      # Use original base name for the stored filename (remove timestamp prefix if present)
+      stored_name = aux_filename
+      if aux_filename =~ /^\d{8}_\d{6}-(.+)$/
+        stored_name = $1
+      end
+      dest_path = File.join(attachments_folder, stored_name)
+      
+      # Handle filename conflicts
+      if File.exist?(dest_path)
+        base_name = File.basename(stored_name, File.extname(stored_name))
+        ext = File.extname(stored_name)
+        counter = 1
+        loop do
+          new_name = "#{base_name}-#{counter}#{ext}"
+          dest_path = File.join(attachments_folder, new_name)
+          break unless File.exist?(dest_path)
+          counter += 1
+        end
+      end
+      
+      begin
+        FileUtils.mv(aux_file, dest_path)
+        Rails.logger.info "📎 Attached auxiliary file: #{aux_filename} -> #{File.basename(dest_path)}"
+      rescue => e
+        Rails.logger.error "❌ Failed to attach auxiliary file #{aux_filename}: #{e.message}"
+      end
+    end
   end
 end

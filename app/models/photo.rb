@@ -26,6 +26,23 @@ class Photo < ApplicationRecord
     }
   end
   
+  # Define RAW file extensions that should be attached to photos
+  def self.raw_file_extensions
+    [
+      '.cr3', '.cr2', '.cr4',  # Canon
+      '.nef',                  # Nikon
+      '.arw', '.srf', '.sr2',  # Sony
+      '.orf',                  # Olympus
+      '.raf',                  # Fuji
+      '.rw2',                  # Panasonic
+      '.dng',                  # Adobe Digital Negative (universal)
+      '.raw',                  # Generic RAW
+      '.3fr',                  # Hasselblad
+      '.ari',                  # ARRIFLEX
+      '.x3f'                   # Sigma
+    ]
+  end
+  
   has_one :medium, as: :mediable, dependent: :destroy
   
   has_many :photo_albums, dependent: :destroy
@@ -515,5 +532,171 @@ class Photo < ApplicationRecord
     
     # Write the image file
     image.write(path)
+  end
+  
+  public
+  
+  # Attach RAW files to this photo by moving them to aux/attachments/
+  # Looks for RAW files in the same directory with matching base filename
+  def attach_raw_files
+    Rails.logger.info "🔍 [ATTACH RAW] attach_raw_files called"
+    Rails.logger.info "  Photo ID: #{id}"
+    Rails.logger.info "  Medium present: #{medium.present?}"
+    Rails.logger.info "  Medium full_file_path: #{medium&.full_file_path}"
+    
+    return unless medium&.full_file_path.present?
+    
+    main_file_path = medium.full_file_path
+    main_dir = File.dirname(main_file_path)
+    main_filename = File.basename(main_file_path)
+    main_base = File.basename(main_file_path, File.extname(main_file_path))
+    
+    Rails.logger.info "  Main file path: #{main_file_path}"
+    Rails.logger.info "  Main directory: #{main_dir}"
+    Rails.logger.info "  Main filename: #{main_filename}"
+    Rails.logger.info "  Main base: #{main_base}"
+    Rails.logger.info "  Directory exists: #{Dir.exist?(main_dir)}"
+    
+    # List all files in directory for debugging
+    if Dir.exist?(main_dir)
+      dir_files = Dir.glob(File.join(main_dir, '*')).select { |f| File.file?(f) }
+      Rails.logger.info "  Files in directory (#{dir_files.length}):"
+      dir_files.each do |f|
+        Rails.logger.info "    - #{File.basename(f)}"
+      end
+    end
+    
+    # Extract the original base name (after timestamp prefix if present)
+    # Format: YYYYMMDD_HHMMSS-original_name.ext
+    # We want to match files with the same original_name
+    original_base = main_base
+    if main_base =~ /^\d{8}_\d{6}-(.+)$/
+      original_base = $1  # Extract name after timestamp prefix
+      Rails.logger.info "  Extracted original_base (after timestamp): #{original_base}"
+    else
+      Rails.logger.info "  No timestamp prefix found, using main_base as original_base"
+    end
+    
+    # Get RAW file extensions (normalize to lowercase for comparison)
+    raw_extensions = self.class.raw_file_extensions
+    raw_extensions_lower = raw_extensions.map(&:downcase)
+    Rails.logger.info "  RAW extensions to search: #{raw_extensions.inspect}"
+    Rails.logger.info "  Normalized extensions (lowercase): #{raw_extensions_lower.inspect}"
+    
+    # Find matching RAW files in the same directory
+    # IMPORTANT: Use case-insensitive matching (CR3, cr3, Cr3 all match)
+    # Strategy: List all files in directory and filter by base name + extension (case-insensitive)
+    raw_files = []
+    
+    if Dir.exist?(main_dir)
+      # Get all files in the directory
+      all_dir_files = Dir.glob(File.join(main_dir, '*')).select { |f| File.file?(f) && f != main_file_path }
+      Rails.logger.info "  Checking #{all_dir_files.length} files in directory for RAW matches"
+      
+      all_dir_files.each do |file_path|
+        file_basename = File.basename(file_path)
+        file_ext_actual = File.extname(file_basename)
+        file_ext_lower = file_ext_actual.downcase
+        file_base = File.basename(file_basename, file_ext_actual)
+        
+        # Check if extension matches (case-insensitive)
+        next unless raw_extensions_lower.include?(file_ext_lower)
+        
+        # Check if base name matches (try multiple patterns)
+        base_matches = false
+        
+        # Pattern 1: Exact match with current base name
+        if file_base == main_base
+          base_matches = true
+          Rails.logger.info "    ✅ File '#{file_basename}' matches pattern 1 (exact base match)"
+        end
+        
+        # Pattern 2: Match with timestamp prefix (same timestamp as main file)
+        if main_base =~ /^(\d{8}_\d{6})-(.+)$/
+          timestamp = $1
+          base_after_timestamp = $2
+          if file_base == "#{timestamp}-#{original_base}"
+            base_matches = true
+            Rails.logger.info "    ✅ File '#{file_basename}' matches pattern 2 (timestamp prefix match)"
+          end
+        end
+        
+        # Pattern 3: Match original base name (for files uploaded together)
+        if file_base == original_base
+          base_matches = true
+          Rails.logger.info "    ✅ File '#{file_basename}' matches pattern 3 (original base match)"
+        end
+        
+        if base_matches
+          Rails.logger.info "    ✅ Found RAW file: #{file_basename} (base: #{file_base}, ext: #{file_ext_actual})"
+          raw_files << file_path
+        else
+          Rails.logger.info "    ❌ File '#{file_basename}' has RAW extension (#{file_ext_actual}) but base name doesn't match"
+          Rails.logger.info "      Main base: '#{main_base}', Original base: '#{original_base}', File base: '#{file_base}'"
+        end
+      end
+    end
+    
+    raw_files.uniq!
+    
+    Rails.logger.info "  Found #{raw_files.length} RAW file(s): #{raw_files.map { |f| File.basename(f) }.join(', ')}"
+    
+    if raw_files.empty?
+      Rails.logger.info "  ℹ️ No RAW files found to attach"
+      return
+    end
+    
+    # Ensure aux folder exists
+    attachments_folder = medium.attachments_folder_path
+    Rails.logger.info "  Attachments folder path: #{attachments_folder}"
+    
+    return unless attachments_folder.present?
+    
+    FileUtils.mkdir_p(attachments_folder) unless Dir.exist?(attachments_folder)
+    Rails.logger.info "  Attachments folder exists: #{Dir.exist?(attachments_folder)}"
+    
+    # Move RAW files to attachments folder
+    raw_files.each do |raw_file|
+      raw_filename = File.basename(raw_file)
+      Rails.logger.info "  Processing RAW file: #{raw_filename}"
+      Rails.logger.info "    Full path: #{raw_file}"
+      Rails.logger.info "    File exists: #{File.exist?(raw_file)}"
+      
+      # Use original base name for the stored filename (remove timestamp prefix if present)
+      stored_name = raw_filename
+      if raw_filename =~ /^\d{8}_\d{6}-(.+)$/
+        stored_name = $1  # Remove timestamp prefix
+        Rails.logger.info "    Removed timestamp prefix, stored_name: #{stored_name}"
+      end
+      dest_path = File.join(attachments_folder, stored_name)
+      
+      # Handle filename conflicts
+      if File.exist?(dest_path)
+        Rails.logger.info "    Destination exists, generating unique name"
+        base_name = File.basename(stored_name, File.extname(stored_name))
+        ext = File.extname(stored_name)
+        counter = 1
+        loop do
+          new_name = "#{base_name}-#{counter}#{ext}"
+          dest_path = File.join(attachments_folder, new_name)
+          break unless File.exist?(dest_path)
+          counter += 1
+        end
+        Rails.logger.info "    Using unique name: #{File.basename(dest_path)}"
+      end
+      
+      Rails.logger.info "    Destination: #{dest_path}"
+      
+      begin
+        FileUtils.mv(raw_file, dest_path)
+        Rails.logger.info "    ✅ Successfully moved RAW file: #{raw_filename} -> #{File.basename(dest_path)}"
+        Rails.logger.info "    Destination exists: #{File.exist?(dest_path)}"
+      rescue => e
+        Rails.logger.error "    ❌ Failed to attach RAW file #{raw_filename}: #{e.message}"
+        Rails.logger.error "    Backtrace: #{e.backtrace.first(5).join("\n")}"
+      end
+    end
+    
+    Rails.logger.info "  ✅ [ATTACH RAW] Completed attaching RAW files"
   end
 end

@@ -13,7 +13,22 @@ files are associated with multiple datetime records. the default trusted datetei
 the medium's filename is a combination of the datetime stamp + a descriptive name such as "tony dancing".  the user can change the descriptive name but the full filename will always include the timestamp, to ensure files are identifiable and displayed in the correct order. 
 
 there is a mediumsorter custom AA page that presents lists of files in the different states and is used for browsing and dragging files from column to column -- which changes the state -- and other basic managmeent like renaming the medium.  When the medium is renamed, it's new name is stored as a column in the model and AR callbacks ensure the filename on disk is modified
-- - -
-here's what i want to change. the basic model for media should be expanded to include "auxiliary" files.  each medium file and its mediable child can have optional attachments that go in an ausiliary folder of attachments. Generic attachments (that can go onto any mediable type) are attached to medium instance while attachments that are mediable-type specific as well as general.  
 
-examples of "general" attachments could be: voice annotation file. (This is distinguished from audio children of the medium class).  example of media-specfic attachments that can go onto the mediable object would be: RAW file for an image. or images stored at various processing steps.
+### Auxiliary Files
+Each medium file can have an auxiliary folder (`filename_base_aux/`) for related files:
+- **Attachments**: User-uploaded files stored in `_aux/attachments/` subfolder. These can be generic (voice annotations, notes) or media-specific (RAW files for photos).
+- **Versions**: Edited versions of media files stored in `_aux/versions/` subfolder (see Versions section below).
+- The auxiliary folder automatically moves and renames with the main file during state transitions.
+- Managed through ActiveAdmin UI with upload/download/delete functionality.
+
+### Media Versioning System
+Media files can have multiple versions with a tree-like history structure:
+- **Version creation**: Users can create new versions by copying the current primary file or uploading a new file.
+- **Version hierarchy**: Versions form a tree structure where each version can have a parent (branching history).
+- **Primary version**: One version is designated as "primary" and used for thumbnails, previews, and display.
+- **Photo editing**: Photos can be edited with cropping, brightness, and contrast adjustments. Changes are saved to the version file.
+- **Version management**: Versions can be deleted (with automatic child re-parenting), made primary, or downloaded.
+- **Human-readable history**: A `versions.json` file in the versions folder maintains version metadata for persistence beyond the application.
+- **Root file protection**: The original uploaded file is never editable or deletable through the UI.
+
+The version system allows for non-destructive editing while preserving the original and maintaining a clear history of changes.

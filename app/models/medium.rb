@@ -544,7 +544,7 @@ class Medium < ApplicationRecord
 
   # Class method to create medium from uploaded file
   def self.create_from_uploaded_file(uploaded_file, user, medium_type = nil, 
-              post_process: false, batch_id: nil, session_id: nil, client_file_path: nil, client_file_date: nil)
+              post_process: false, batch_id: nil, session_id: nil, client_file_path: nil, client_file_date: nil, all_files: nil)
     upload_started_at = Time.current
     
     # Determine medium type if not specified
@@ -584,6 +584,37 @@ class Medium < ApplicationRecord
       return { error: "Duplicate file already exists", existing: existing_medium }
     end
     
+    # Detect and store auxiliary files if all_files is provided
+    # IMPORTANT: We only upload sidecar files (like .cr3) that match the main file by base name
+    # We do NOT upload orphaned raw files - only sidecars for files being uploaded
+    auxiliary_files_stored = []
+    Rails.logger.info "🔍 [UPLOAD DEBUG] Checking for auxiliary files"
+    Rails.logger.info "  Main file: #{uploaded_file.original_filename}"
+    Rails.logger.info "  All files provided: #{all_files.present?}"
+    Rails.logger.info "  All files count: #{all_files&.length || 0}"
+    
+    if all_files.present?
+      # Only detect auxiliary files that match this specific main file by base name
+      auxiliary_files = detect_auxiliary_files(uploaded_file, all_files, medium_type)
+      if auxiliary_files.present?
+        Rails.logger.info "📎 [UPLOAD] Detected #{auxiliary_files.length} auxiliary file(s) for #{uploaded_file.original_filename}"
+        # Store auxiliary files temporarily in the same directory
+        auxiliary_files.each do |aux_file|
+          aux_filename = "#{temp_timestamp}-#{aux_file.original_filename}"
+          aux_file_path = File.join(upload_dir, aux_filename)
+          save_uploaded_file_to_path(aux_file, aux_file_path)
+          auxiliary_files_stored << aux_file_path
+          Rails.logger.info "  ✅ [UPLOAD] Stored auxiliary file: #{aux_file.original_filename} -> #{aux_filename}"
+          Rails.logger.info "     Full path: #{aux_file_path}"
+          Rails.logger.info "     File exists: #{File.exist?(aux_file_path)}"
+        end
+      else
+        Rails.logger.info "  ℹ️ [UPLOAD] No auxiliary files detected for #{uploaded_file.original_filename}"
+      end
+    else
+      Rails.logger.warn "  ⚠️ [UPLOAD] all_files not provided - cannot detect auxiliary files"
+    end
+    
     upload_completed_at = Time.current
     
     # Create the specific media type record (minimal data for now)
@@ -613,6 +644,10 @@ class Medium < ApplicationRecord
     if medium.save
       # The mediable association is already set in the medium creation above
       
+      # Store auxiliary file paths temporarily (will be moved to aux folder during post-processing)
+      # We'll use a simple approach: store them in the same directory with a marker
+      # The post-processing will move them to the aux folder
+      
       # Process type-specific metadata if requested
       Rails.logger.info "🔍 Post-process parameter: #{post_process} for: #{medium.original_filename}"
       if post_process
@@ -634,10 +669,11 @@ class Medium < ApplicationRecord
         Rails.logger.info "⏭️ Skipping post-processing for: #{medium.original_filename}"
       end
       
-      { success: true, medium: medium }
+      { success: true, medium: medium, auxiliary_files: auxiliary_files_stored }
     else
       # Clean up files if creation failed
       File.delete(full_file_path) if File.exist?(full_file_path)
+      auxiliary_files_stored.each { |path| File.delete(path) if File.exist?(path) }
       mediable.destroy if mediable
       
       error_message = medium.errors.full_messages.join(', ')
@@ -732,6 +768,95 @@ class Medium < ApplicationRecord
       end
     end
   end
+  
+  # Detect auxiliary files for a main file based on base filename matching
+  # IMPORTANT: Only returns sidecar files that match the main file's base name
+  # This ensures we only upload auxiliary files (like .cr3) when they have a matching media file
+  # We do NOT upload orphaned raw files - only sidecars for files being uploaded
+  # Returns array of file objects that match auxiliary file patterns
+  def self.detect_auxiliary_files(main_file, all_files, medium_type)
+    Rails.logger.info "🔍 [AUX DEBUG] detect_auxiliary_files called"
+    Rails.logger.info "  Main file: #{main_file&.original_filename}"
+    Rails.logger.info "  Medium type: #{medium_type}"
+    Rails.logger.info "  All files count: #{all_files&.length || 0}"
+    
+    return [] unless main_file && all_files.present?
+    
+    # Get base filename without extension (use actual extension case for extraction)
+    main_ext_actual = File.extname(main_file.original_filename)
+    main_base = File.basename(main_file.original_filename, main_ext_actual)
+    Rails.logger.info "  Main base name: #{main_base}"
+    Rails.logger.info "  Main extension (actual): #{main_ext_actual}"
+    
+    # Get auxiliary file extensions for this media type (normalize to lowercase for comparison)
+    auxiliary_extensions = []
+    case medium_type
+    when 'photo'
+      auxiliary_extensions = Photo.raw_file_extensions if defined?(Photo) && Photo.respond_to?(:raw_file_extensions)
+      Rails.logger.info "  Photo RAW extensions: #{auxiliary_extensions.inspect}"
+    when 'audio'
+      auxiliary_extensions = Audio.auxiliary_file_extensions if defined?(Audio) && Audio.respond_to?(:auxiliary_file_extensions)
+      Rails.logger.info "  Audio auxiliary extensions: #{auxiliary_extensions.inspect}"
+    when 'video'
+      auxiliary_extensions = Video.auxiliary_file_extensions if defined?(Video) && Video.respond_to?(:auxiliary_file_extensions)
+      Rails.logger.info "  Video auxiliary extensions: #{auxiliary_extensions.inspect}"
+    end
+    
+    if auxiliary_extensions.empty?
+      Rails.logger.warn "  ⚠️ No auxiliary extensions found for medium_type: #{medium_type}"
+      return []
+    end
+    
+    # Normalize extension list to lowercase for case-insensitive comparison
+    auxiliary_extensions_lower = auxiliary_extensions.map(&:downcase)
+    Rails.logger.info "  Normalized extensions (lowercase): #{auxiliary_extensions_lower.inspect}"
+    
+    # Log all files for debugging
+    Rails.logger.info "  All files in batch:"
+    all_files.each_with_index do |file, idx|
+      file_ext_actual = File.extname(file.original_filename)
+      file_ext_lower = file_ext_actual.downcase
+      file_base = File.basename(file.original_filename, file_ext_actual)
+      Rails.logger.info "    [#{idx}] #{file.original_filename} (base: #{file_base}, ext actual: #{file_ext_actual}, ext lower: #{file_ext_lower})"
+    end
+    
+    # Find files that match the base name with auxiliary extensions
+    # CRITICAL: Only match files with EXACT same base name - this ensures we only
+    # upload sidecar files that belong to the main file being uploaded
+    # IMPORTANT: Use case-insensitive extension matching (CR3, cr3, Cr3 all match)
+    matches = all_files.select do |file|
+      next if file == main_file  # Skip the main file itself
+      
+      # Use actual extension (case-preserved) for basename extraction
+      file_ext_actual = File.extname(file.original_filename)
+      file_base = File.basename(file.original_filename, file_ext_actual)
+      # Use lowercase for extension comparison (case-insensitive)
+      file_ext_lower = file_ext_actual.downcase
+      
+      # Match ONLY if base name matches EXACTLY and extension (case-insensitive) is in auxiliary list
+      # This prevents uploading orphaned raw files that don't have a matching main file
+      is_match = file_base == main_base && auxiliary_extensions_lower.include?(file_ext_lower)
+      Rails.logger.info "    Checking: #{file.original_filename}"
+      Rails.logger.info "      Main base: '#{main_base}' vs File base: '#{file_base}' -> #{main_base == file_base ? 'MATCH' : 'NO MATCH'}"
+      Rails.logger.info "      Extension actual: '#{file_ext_actual}', lower: '#{file_ext_lower}'"
+      Rails.logger.info "      Extension in list (case-insensitive): #{auxiliary_extensions_lower.include?(file_ext_lower)}"
+      Rails.logger.info "      Result: #{is_match ? '✅ MATCH' : '❌ no match'}"
+      is_match
+    end
+    
+    Rails.logger.info "  ✅ Found #{matches.length} auxiliary file(s): #{matches.map(&:original_filename).join(', ')}"
+    if matches.empty?
+      Rails.logger.warn "  ⚠️ No auxiliary files matched. Main base: '#{main_base}', Extensions searched: #{auxiliary_extensions.inspect}"
+      Rails.logger.warn "  All files in batch:"
+      all_files.each do |f|
+        next if f == main_file
+        f_base = File.basename(f.original_filename, File.extname(f.original_filename))
+        f_ext = File.extname(f.original_filename).downcase
+        Rails.logger.warn "    - #{f.original_filename} (base: '#{f_base}', ext: '#{f_ext}')"
+      end
+    end
+    matches
+  end
 
   
 
@@ -812,13 +937,34 @@ class Medium < ApplicationRecord
         datetime_intrinsic = photo.datetime_intrinsic
         Rails.logger.info "Extracted datetime_intrinsic: #{datetime_intrinsic} for #{medium.original_filename}"
         
+        # IMPORTANT: Attach RAW files BEFORE renaming, so we can find .cr3 files with matching timestamp prefix
+        # Attach RAW files to aux/attachments/ folder
+        Rails.logger.info "🔍 [POST-PROCESS] About to call attach_raw_files for photo #{photo.id} (BEFORE rename)"
+        Rails.logger.info "  Current filename: #{medium.current_filename}"
+        Rails.logger.info "  Full file path: #{medium.full_file_path}"
+        begin
+          photo.attach_raw_files
+          Rails.logger.info "  ✅ attach_raw_files called successfully"
+        rescue NoMethodError => e
+          Rails.logger.error "  ❌ attach_raw_files method not found: #{e.message}"
+          Rails.logger.error "  Available methods: #{photo.methods.grep(/attach|raw|aux/i).join(', ')}"
+        rescue => e
+          Rails.logger.error "  ❌ Error calling attach_raw_files: #{e.message}"
+          Rails.logger.error "  Backtrace: #{e.backtrace.first(5).join("\n")}"
+        end
+        
         # Update Medium with intrinsic datetime if present
         if datetime_intrinsic.present?
           medium.update_columns(datetime_intrinsic: datetime_intrinsic)
           Rails.logger.info "Set datetime_intrinsic: #{datetime_intrinsic} for #{medium.original_filename}"
           
-          # Rename file to use proper datetime-based filename
+          # Rename file to use proper datetime-based filename (AFTER attaching RAW files)
+          Rails.logger.info "🔍 [POST-PROCESS] About to rename file (AFTER attach_raw_files)"
+          Rails.logger.info "  Current filename: #{medium.current_filename}"
+          Rails.logger.info "  Current full path: #{medium.full_file_path}"
           rename_file_to_datetime_based_name(medium, datetime_intrinsic)
+          Rails.logger.info "  After rename - filename: #{medium.current_filename}"
+          Rails.logger.info "  After rename - full path: #{medium.full_file_path}"
         end
         
         # ALWAYS set datetime_inferred as a fallback, regardless of whether intrinsic exists
@@ -880,6 +1026,9 @@ class Medium < ApplicationRecord
       description = audio.extract_description_from_metadata if audio.respond_to?(:extract_description_from_metadata)
       medium.update_columns(description: description || "")
       
+      # Attach auxiliary files (XML, CUE) to aux/attachments/ folder
+      audio.attach_auxiliary_files if audio.respond_to?(:attach_auxiliary_files)
+      
       # Handle datetime
       datetime_intrinsic = medium.mediable.datetime_intrinsic if medium.mediable&.respond_to?(:datetime_intrinsic)
       
@@ -900,6 +1049,9 @@ class Medium < ApplicationRecord
       video = medium.mediable
       description = video.extract_description_from_metadata if video&.respond_to?(:extract_description_from_metadata)
       medium.update_columns(description: description || "")
+      
+      # Attach auxiliary files (XML, subtitles) to aux/attachments/ folder
+      video.attach_auxiliary_files if video&.respond_to?(:attach_auxiliary_files)
       
       # Extract video metadata when we add video support
       datetime_intrinsic = medium.mediable.datetime_intrinsic if medium.mediable&.respond_to?(:datetime_intrinsic)
@@ -1091,17 +1243,14 @@ class Medium < ApplicationRecord
     require_relative '../../lib/constants'
     removed_count = 0
     
-    # Check unsorted and daily storage directories
+    # Check unsorted and daily storage directories (no media-type subdirectories)
+    # Daily structure: daily/YYYY/MM/DD/
+    # Unsorted structure: unsorted/ (flat)
     [Constants::UNSORTED_STORAGE, Constants::DAILY_STORAGE].each do |storage_base|
       next unless Dir.exist?(storage_base)
       
-      %w[photos videos audios].each do |medium_type|
-        storage_dir = File.join(storage_base, medium_type)
-        next unless Dir.exist?(storage_dir)
-        
-        # Recursively find and remove empty directories
-        removed_count += remove_empty_dirs_recursive(storage_dir)
-      end
+      # Recursively find and remove empty directories
+      removed_count += remove_empty_dirs_recursive(storage_base)
     end
     
     # Handle events storage separately (different structure)
@@ -1613,12 +1762,22 @@ class Medium < ApplicationRecord
   def self.rename_file_to_datetime_based_name(medium, datetime)
     Rails.logger.info "Starting file rename for medium #{medium.id}: current_filename=#{medium.current_filename}, original_filename=#{medium.original_filename}"
     
+    # IMPORTANT: Store old filename BEFORE any updates (current_filename_was won't work with update_columns)
+    old_filename = medium.current_filename
+    
     # Generate new filename using proper datetime
     timestamp = datetime.strftime("%Y%m%d_%H%M%S")
     original_filename = medium.original_filename
     new_filename = "#{timestamp}-#{original_filename}"
     
     Rails.logger.info "Generated new filename: #{new_filename}"
+    Rails.logger.info "Old filename (stored): #{old_filename}"
+    
+    # Check if the new filename is the same as the old filename (no rename needed)
+    if old_filename == new_filename
+      Rails.logger.info "Filename is already correct (matches EXIF datetime), skipping rename"
+      return true
+    end
     
     # Check if the new filename would conflict with existing files
     if Medium.where(current_filename: new_filename).where.not(id: medium.id).exists?
@@ -1632,6 +1791,12 @@ class Medium < ApplicationRecord
     
     # Generate new file path
     new_file_path = File.join(File.dirname(old_file_path), new_filename)
+    
+    # Double-check that we're not trying to rename to the same path
+    if old_file_path == new_file_path
+      Rails.logger.info "Source and destination paths are the same, skipping rename"
+      return true
+    end
     
     begin
       # Rename the file on disk
@@ -1671,8 +1836,7 @@ class Medium < ApplicationRecord
         end
       end
       
-      # Rename aux folder if it exists
-      old_filename = medium.current_filename_was || (old_file_path ? File.basename(old_file_path) : nil)
+      # Rename aux folder if it exists (use stored old_filename, not current_filename_was)
       if old_filename && old_filename != new_filename
         dir = File.dirname(new_file_path)
         old_base = File.basename(old_filename, File.extname(old_filename))
@@ -1680,14 +1844,25 @@ class Medium < ApplicationRecord
         old_aux_path = File.join(dir, "#{old_base}_aux")
         new_aux_path = File.join(dir, "#{new_base}_aux")
         
+        Rails.logger.info "Checking for aux folder rename:"
+        Rails.logger.info "  Old aux path: #{old_aux_path}"
+        Rails.logger.info "  New aux path: #{new_aux_path}"
+        Rails.logger.info "  Old aux exists: #{Dir.exist?(old_aux_path)}"
+        Rails.logger.info "  New aux exists: #{Dir.exist?(new_aux_path)}"
+        
         if Dir.exist?(old_aux_path)
           begin
             FileUtils.mv(old_aux_path, new_aux_path)
-            Rails.logger.info "Renamed aux folder from #{old_aux_path} to #{new_aux_path}"
+            Rails.logger.info "✅ Renamed aux folder from #{old_aux_path} to #{new_aux_path}"
           rescue => e
-            Rails.logger.error "Failed to rename aux folder: #{e.message}"
+            Rails.logger.error "❌ Failed to rename aux folder: #{e.message}"
+            Rails.logger.error "  Backtrace: #{e.backtrace.first(5).join("\n")}"
           end
+        else
+          Rails.logger.info "  ℹ️ Old aux folder does not exist, skipping rename"
         end
+      else
+        Rails.logger.info "  ℹ️ Filenames are the same or old_filename is nil, skipping aux folder rename"
       end
       
       true

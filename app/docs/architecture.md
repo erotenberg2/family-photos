@@ -13,11 +13,16 @@ This is a Rails + ActiveAdmin project for managing family media (photos, videos,
   - Stores: file metadata, timestamps, storage state, MD5 hash
   - Polymorphically belongs to: `Photo`, `Audio`, `Video`
   - Has polymorphic association: `mediable`
+  - Version management: `versions` (JSON), `primary` (string), `description` (text)
 
 - **Photo**: Media-specific record
   - Stores: EXIF data, dimensions, thumbnail/preview paths
   - Extracts GPS coordinates and camera metadata
   - Generates thumbnails (128px) and previews (400px)
+  - Photo-specific editing via Photo controller:
+    - Cropping with drag-to-select interface
+    - Brightness/contrast adjustments with ImageMagick
+    - Edit page accessible from versions table
 
 - **Audio**: Audio media record
   - Stores: Artist, album, genre, duration, bitrate
@@ -62,8 +67,11 @@ State transitions automatically move files on disk via before/after callbacks.
   ├── unsorted/          # Initial uploads
   │   ├── YYYYMMDD_HHMMSS-filename.jpg
   │   └── YYYYMMDD_HHMMSS-filename_aux/
-  │       └── attachments/
-  │           └── (attachment files)
+  │       ├── attachments/
+  │       │   └── (attachment files)
+  │       └── versions/
+  │           ├── versions.json
+  │           └── (version files)
   ├── daily/
   │   ├── YYYY/
   │   │   ├── MM/
@@ -74,15 +82,17 @@ State transitions automatically move files on disk via before/after callbacks.
       └── YYYY-MM-DD_to_YYYY-MM-DD_Event_Name/
           ├── (event media)
           ├── YYYYMMDD_HHMMSS-filename.jpg
-          ├── YYYYMMDD_HHMMSS-filename_aux/attachments/...
+          ├── YYYYMMDD_HHMMSS-filename_aux/
+          │   ├── attachments/...
+          │   └── versions/...
           ├── Subevent_Name/
           │   ├── (subevent media)
           │   └── Child_Subevent/
           └── ...
 
 ~/Desktop/Family Album Internals/
-  ├── thumbs/           # 128px thumbnails (photos/videos)
-  └── previews/         # 400px previews (photos/videos)
+  ├── thumbs/           # 128px thumbnails (photos/videos, from primary version)
+  └── previews/         # 400px previews (photos/videos, from primary version)
 ```
 
 #### Path Computation
@@ -266,6 +276,10 @@ Pretty-formats JSON for display (EXIF data)
 - Audio metadata via ffprobe (ID3 tags, duration, bitrate)
 - Video metadata via ffprobe (dimensions, duration, bitrate)
 - Video thumbnails via ffmpeg (optional)
+- Description extraction during post-processing:
+  - Photos: EXIF ImageDescription, UserComment, Caption, Description
+  - Audio: Comment field from metadata
+  - Populates `Medium.description` column
 
 ### Medium Attachments
 Each Medium can have an auxiliary folder for related files:
@@ -276,6 +290,120 @@ Each Medium can have an auxiliary folder for related files:
 - UI: ActiveAdmin show page with upload/download/delete interface
 - Flexible: room for other categories in aux folder (separate from attachments)
 - No database storage: attachments detected by scanning directory
+
+### Media Versioning System
+
+#### Overview
+Media files can have multiple versions with a tree-like history structure. Versions allow for:
+- Editing photos with cropping, brightness, and contrast adjustments
+- Creating alternative versions while preserving originals
+- Tracking version history and relationships
+- Designating a primary version for display/thumbnails
+
+#### Version Storage Structure
+```
+filename_base_aux/
+  └── versions/
+      ├── versions.json              # Human-readable version metadata
+      ├── v1_cropped.jpg             # Version files
+      ├── v2_brightened.jpg
+      └── v3_color_adjusted.jpg
+```
+
+#### Database Schema
+- **`Medium.versions`** (JSON column): Array of version objects with:
+  - `filename`: Version file name (e.g., `v1_cropped.jpg`)
+  - `description`: User-provided description
+  - `parent`: Parent version filename (null for root versions)
+  - `created_at`: ISO8601 timestamp
+  - `modified_at`: ISO8601 timestamp
+- **`Medium.primary`** (string column): Designates which version is primary
+  - `null` = root file is primary
+  - `"v1_cropped.jpg"` = that version is primary
+
+#### Version Hierarchy
+Versions form a tree structure:
+- **Root file**: The original uploaded file (never editable, never deleted)
+- **Root versions**: Direct children of root (parent = null)
+- **Branch versions**: Children of other versions (parent = version filename)
+- Allows for branching history (e.g., two different edits of the same version)
+
+#### Primary Version
+- One version (or root) is designated as "primary"
+- Primary version is used for:
+  - Thumbnail generation
+  - Preview generation
+  - Display in index/show pages
+- Changing primary triggers automatic thumbnail/preview regeneration
+- Root file can be primary (default when no versions exist)
+
+#### Version Operations
+
+**Create In-Place Version:**
+- Copies current primary file (or root) to a new version
+- New version is a child of the current primary
+- User provides description
+- Automatic filename generation: `v{N}_{description}.{extension}`
+- Ensures unique filenames
+
+**Upload New Version:**
+- Uploads external file as new version
+- New version is a child of the current primary
+- User provides description and file
+- Automatic filename generation and uniqueness checks
+
+**Make Primary:**
+- Sets a version (or root) as primary
+- Triggers thumbnail/preview regeneration if changed
+- UI shows green checkmark on primary version
+
+**Edit Version:**
+- Photo-specific editing via popup window:
+  - Cropping (drag-to-select)
+  - Brightness adjustment (-100 to +100, non-linear scaling)
+  - Contrast adjustment (-100 to +100)
+- Changes saved back to version file
+- If edited version is primary, thumbnails regenerate automatically
+- Audio/video editing: Placeholder UI (not yet implemented)
+
+**Delete Version:**
+- Deletes version file and removes from versions array
+- Children are re-parented to deleted version's parent
+- If deleted version was primary, primary resets to null (root)
+- Confirmation dialog warns if children exist
+
+#### versions.json File
+- Human-readable JSON file in `_aux/versions/` folder
+- Mirrors database `versions` JSON structure
+- Includes `primary` field for easy inspection
+- Synchronized automatically on version changes
+- Persists beyond application lifetime
+
+#### Version UI
+- ActiveAdmin Medium show page includes "Versions" panel:
+  - Root version table (always one row)
+  - Versions table (all edited versions)
+  - "Create in-place version" button
+  - "Upload new version" button
+  - Primary indicator (green checkmark)
+  - Parent column showing version lineage
+  - Actions: Download, Edit, Make primary, Delete
+- Photo editing popup window with real-time preview
+
+#### Thumbnail/Preview Generation
+- Always generated from primary version (or root if no primary)
+- Consistent naming based on main file (not version-specific)
+- Regenerates automatically when primary changes
+- Stored in centralized location: `ROOT_THUMB_AND_PREVIEW/thumbs/` and `previews/`
+
+#### Medium Description
+- **`Medium.description`** (text column): Non-null, default ""
+- Populated during post-processing from metadata:
+  - Photos: EXIF fields (ImageDescription, UserComment, Caption, Description)
+  - Audio: Comment field from metadata
+  - Video: Placeholder (not yet implemented)
+- Falls back to empty string if no metadata found
+- Separate from version descriptions (which are version-specific)
 
 ## Technical Stack
 

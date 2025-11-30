@@ -109,20 +109,23 @@ window.MediaImportPopup = {
   handleDirectorySelect: function(event) {
     const files = Array.from(event.target.files);
     console.log(`Selected ${files.length} files from directory`);
-    console.log('First few files:', files.slice(0, 3).map(f => f.name));
+    console.log('All selected files:', files.map(f => f.name));
     
-    // Debug: Log file metadata including lastModified
-    console.log('File metadata for first 3 files:');
-    files.slice(0, 3).forEach(file => {
+    // Debug: Log file metadata for ALL files
+    console.log('File metadata for all files:');
+    files.forEach(file => {
+      const fileType = this.getFileType(file);
       console.log(`File: ${file.name}`);
       console.log(`  - lastModified: ${file.lastModified} (${new Date(file.lastModified)})`);
       console.log(`  - size: ${file.size}`);
       console.log(`  - type: ${file.type}`);
+      console.log(`  - detected type: ${fileType}`);
       console.log(`  - webkitRelativePath: ${file.webkitRelativePath}`);
     });
     
     this.currentFiles = files;
     console.log('Stored files in currentFiles:', this.currentFiles.length);
+    console.log('All files in currentFiles:', this.currentFiles.map(f => f.name));
     this.updateFilePreview();
   },
 
@@ -152,7 +155,13 @@ window.MediaImportPopup = {
     const filteredFiles = this.filterFilesByType(this.currentFiles, selectedTypes);
     console.log('Filtered files count:', filteredFiles.length);
     
-    fileCount.textContent = `${filteredFiles.length} files selected`;
+    // Count ALL files (including auxiliary files like .cr3, .xml, etc.)
+    const totalFiles = this.currentFiles.length;
+    const validMediaFiles = filteredFiles.length;
+    const auxiliaryFiles = totalFiles - validMediaFiles;
+    
+    // Show total files that will be uploaded (all files, including auxiliary)
+    fileCount.textContent = `${totalFiles} files selected (${validMediaFiles} media files${auxiliaryFiles > 0 ? `, ${auxiliaryFiles} auxiliary` : ''})`;
     
     if (filteredFiles.length === 0) {
       fileList.innerHTML = '<p style="color: #666; font-style: italic;">No compatible files found.</p>';
@@ -162,7 +171,7 @@ window.MediaImportPopup = {
     
     if (importButton) importButton.disabled = false;
     
-    // Count files by type
+    // Count files by type (only valid media types)
     const filesByType = {};
     filteredFiles.forEach(file => {
       const type = this.getFileType(file);
@@ -183,6 +192,13 @@ window.MediaImportPopup = {
       const label = typeLabels[type] || `📄 ${type.charAt(0).toUpperCase() + type.slice(1)}`;
       html += `<div style="margin-bottom: 8px; font-size: 14px;">
         <strong>${label}:</strong> ${count}
+      </div>`;
+    }
+    
+    // Show auxiliary files count if any
+    if (auxiliaryFiles > 0) {
+      html += `<div style="margin-bottom: 8px; font-size: 14px; color: #666; font-style: italic;">
+        <strong>📎 Auxiliary files:</strong> ${auxiliaryFiles} (will be attached to matching media files)
       </div>`;
     }
     
@@ -223,7 +239,15 @@ window.MediaImportPopup = {
       uploadFeedback.innerHTML = '<div style="color: #007cba; font-weight: bold;">Starting import...</div>';
     }
     
-    this.uploadFiles(filteredFiles, selectedTypes);
+    // Upload ALL files (including auxiliary files like RAW, XML, etc.) so they can be detected and attached
+    // The backend will filter and process only valid media types, but will have access to all files for auxiliary detection
+    console.log('🔍 [UPLOAD DEBUG] About to upload files');
+    console.log('  currentFiles count:', this.currentFiles.length);
+    console.log('  currentFiles names:', this.currentFiles.map(f => f.name));
+    console.log('  filteredFiles count:', filteredFiles.length);
+    console.log('  filteredFiles names:', filteredFiles.map(f => f.name));
+    console.log('  Will upload ALL files in currentFiles (not filteredFiles)');
+    this.uploadFiles(this.currentFiles, selectedTypes);
   },
 
   uploadFiles: function(files, selectedTypes) {
@@ -246,7 +270,9 @@ window.MediaImportPopup = {
       const formData = new FormData();
       
       // Add files to form data
-      chunk.forEach(file => {
+      console.log(`🔍 [UPLOAD DEBUG] Adding ${chunk.length} files to FormData:`);
+      chunk.forEach((file, idx) => {
+        console.log(`  [${idx}] ${file.name} (type: ${file.type}, size: ${file.size})`);
         formData.append('media_files[]', file);
       });
       
