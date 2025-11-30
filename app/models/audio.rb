@@ -173,4 +173,11 @@ class Audio < ApplicationRecord
     return nil unless bitrate.present?
     "#{bitrate} kbps"
   end
+
+  # Extract description from audio metadata
+  # Uses the comment field from audio tags
+  def extract_description_from_metadata
+    return "" unless comment.present?
+    comment.strip
+  end
 end

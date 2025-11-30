@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_11_04_000001) do
+ActiveRecord::Schema[8.0].define(version: 2025_11_29_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -155,18 +155,22 @@ ActiveRecord::Schema[8.0].define(version: 2025_11_04_000001) do
     t.string "current_filename", null: false
     t.string "storage_state", default: "unsorted", null: false
     t.json "versions", default: []
+    t.string "primary"
+    t.string "description", default: "", null: false
     t.index ["created_at"], name: "index_media_on_created_at"
     t.index ["current_filename"], name: "index_media_on_current_filename"
     t.index ["datetime_inferred"], name: "index_media_on_datetime_inferred"
     t.index ["datetime_intrinsic"], name: "index_media_on_datetime_intrinsic"
     t.index ["datetime_source_last_modified"], name: "index_media_on_datetime_source_last_modified"
     t.index ["datetime_user"], name: "index_media_on_datetime_user"
+    t.index ["description"], name: "index_media_on_description"
     t.index ["event_id"], name: "index_media_on_event_id"
     t.index ["latitude"], name: "index_media_on_latitude"
     t.index ["longitude"], name: "index_media_on_longitude"
     t.index ["md5_hash"], name: "index_media_on_md5_hash", unique: true
     t.index ["mediable_type", "mediable_id"], name: "index_media_on_mediable"
     t.index ["medium_type"], name: "index_media_on_medium_type"
+    t.index ["primary"], name: "index_media_on_primary"
     t.index ["storage_state"], name: "index_media_on_storage_state"
     t.index ["subevent_id"], name: "index_media_on_subevent_id"
     t.index ["uploaded_by_id"], name: "index_media_on_uploaded_by_id"

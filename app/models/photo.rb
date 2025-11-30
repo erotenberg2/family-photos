@@ -225,21 +225,23 @@ class Photo < ApplicationRecord
   public
 
   def generate_thumbnail_path
-    return nil unless medium&.full_file_path
+    return nil unless medium&.current_filename
     
     require_relative '../../lib/constants'
-    ext = File.extname(medium.full_file_path)
-    base = File.basename(medium.full_file_path, ext)
+    # Always use main filename for thumbnail paths (consistent regardless of primary version)
+    ext = File.extname(medium.current_filename)
+    base = File.basename(medium.current_filename, ext)
     
     File.join(Constants::THUMBNAILS_STORAGE, "#{base}_thumb#{ext}")
   end
 
   def generate_preview_path
-    return nil unless medium&.full_file_path
+    return nil unless medium&.current_filename
     
     require_relative '../../lib/constants'
-    ext = File.extname(medium.full_file_path)
-    base = File.basename(medium.full_file_path, ext)
+    # Always use main filename for preview paths (consistent regardless of primary version)
+    ext = File.extname(medium.current_filename)
+    base = File.basename(medium.current_filename, ext)
     
     File.join(Constants::PREVIEWS_STORAGE, "#{base}_preview#{ext}")
   end
@@ -303,7 +305,9 @@ class Photo < ApplicationRecord
   end
 
   def generate_thumbnail
-    return unless medium&.full_file_path.present? && File.exist?(medium.full_file_path)
+    # Use primary file path if set, otherwise main file path
+    source_path = medium.source_file_path_for_thumbnails || medium.full_file_path
+    return unless source_path.present? && File.exist?(source_path)
     
     begin
       require 'mini_magick'
@@ -358,6 +362,29 @@ class Photo < ApplicationRecord
     self.longitude = extract_gps_coordinate(exif_info, gps_lon_key, exif_info[gps_lon_ref_key])
     
     # Note: Changes are saved by explicit update_columns call in post-processing
+  end
+
+  # Extract description from EXIF metadata
+  # Tries common EXIF description fields: ImageDescription, Comment, Caption, etc.
+  def extract_description_from_metadata
+    return "" unless medium&.full_file_path&.present?
+    
+    exif_info = extract_exif_data(medium.full_file_path)
+    return "" unless exif_info.present?
+    
+    # Try various EXIF fields that might contain descriptions
+    description_fields = [
+      'ImageDescription', 'image_description',
+      'UserComment', 'user_comment',
+      'Comment', 'comment',
+      'Caption', 'caption',
+      'Description', 'description',
+      'XPComment', 'xp_comment',
+      'XPSubject', 'xp_subject'
+    ]
+    
+    description = find_exif_value_case_insensitive(exif_info, description_fields)
+    description&.strip || ""
   end
 
   def extract_gps_coordinate(exif_hash, coord_key, ref_value)
@@ -469,8 +496,9 @@ class Photo < ApplicationRecord
     dir = File.dirname(path)
     FileUtils.mkdir_p(dir) unless Dir.exist?(dir)
     
-    # Open and resize image
-    image = MiniMagick::Image.open(medium.full_file_path)
+    # Open and resize image - use primary file path if set, otherwise main file
+    source_path = medium.source_file_path_for_thumbnails || medium.full_file_path
+    image = MiniMagick::Image.open(source_path)
     image.resize "#{size[:width]}x#{size[:height]}>"
     
     # Convert HEIC to JPEG for better browser compatibility
@@ -488,6 +516,4 @@ class Photo < ApplicationRecord
     # Write the image file
     image.write(path)
   end
-
-  public
 end

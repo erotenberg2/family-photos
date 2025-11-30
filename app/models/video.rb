@@ -101,28 +101,32 @@ class Video < ApplicationRecord
   public
 
   def generate_thumbnail_path
-    return nil unless medium&.full_file_path
+    return nil unless medium&.current_filename
     
     require_relative '../../lib/constants'
     ext = '.jpg'  # Video thumbnails are always JPEG
-    base = File.basename(medium.full_file_path, File.extname(medium.full_file_path))
+    # Always use main filename for thumbnail paths (consistent regardless of primary version)
+    base = File.basename(medium.current_filename, File.extname(medium.current_filename))
     
     File.join(Constants::THUMBNAILS_STORAGE, "#{base}_thumb#{ext}")
   end
 
   def generate_preview_path
-    return nil unless medium&.full_file_path
+    return nil unless medium&.current_filename
     
     require_relative '../../lib/constants'
     ext = '.jpg'  # Video previews are always JPEG
-    base = File.basename(medium.full_file_path, File.extname(medium.full_file_path))
+    # Always use main filename for preview paths (consistent regardless of primary version)
+    base = File.basename(medium.current_filename, File.extname(medium.current_filename))
     
     File.join(Constants::PREVIEWS_STORAGE, "#{base}_preview#{ext}")
   end
 
   # Generate thumbnail from video
   def generate_thumbnail
-    return unless medium&.full_file_path.present? && File.exist?(medium.full_file_path)
+    # Use primary file path if set, otherwise main file path
+    source_path = medium.source_file_path_for_thumbnails || medium.full_file_path
+    return unless source_path.present? && File.exist?(source_path)
     
     begin
       require 'mini_magick'
@@ -191,6 +195,14 @@ class Video < ApplicationRecord
     end
   end
 
+  # Extract description from video metadata
+  # For now, returns empty string since video metadata extraction is not yet fully implemented
+  def extract_description_from_metadata
+    # TODO: Extract description from video metadata when video metadata extraction is implemented
+    # Could use ffprobe to get tags like 'description', 'comment', etc. similar to audio
+    ""
+  end
+
   def generate_video_variant(variant_type)
     # Calculate size and paths based on variant type
     size = variant_type == :thumbnail ? calculate_thumbnail_size : calculate_preview_size
@@ -216,10 +228,12 @@ class Video < ApplicationRecord
     require 'open3'
     
     # Use ffmpeg to extract a frame from the video
+    # Use primary file path if set, otherwise main file path
+    source_path = medium.source_file_path_for_thumbnails || medium.full_file_path
     # Try to get a frame from 10% into the video (more likely to be non-black)
     ffmpeg_cmd = [
       'ffmpeg',
-      '-i', medium.full_file_path,
+      '-i', source_path,
       '-ss', '00:00:01',  # Seek to 1 second
       '-vframes', '1',     # Extract 1 frame
       '-vf', "scale=#{size[:width]}:-1",  # Scale to target width, maintain aspect ratio

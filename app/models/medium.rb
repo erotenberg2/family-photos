@@ -55,10 +55,13 @@ class Medium < ApplicationRecord
   
   # Validation for descriptive_name (used in filename)
   validate :descriptive_name_contains_no_illegal_characters
+  validate :primary_version_exists
 
   # Callbacks for file operations
   before_update :rename_file_on_disk, if: :current_filename_changed?
   after_update :rename_file_if_datetime_changed, if: :effective_datetime_changed?
+  after_update :regenerate_thumbnails_for_primary, if: :primary_changed?
+  after_save :sync_versions_json, if: -> { saved_change_to_versions? || saved_change_to_primary? }
   before_destroy :store_mediable_info
   after_destroy :cleanup_thumbnails_and_previews
   
@@ -396,9 +399,7 @@ class Medium < ApplicationRecord
     mediable&.title
   end
 
-  def description  
-    mediable&.description
-  end
+  # Description is now stored directly on Medium, not delegated from mediable
   
   # Check if file exists
   # Helper method to get the full file path (directory + filename)
@@ -605,7 +606,8 @@ class Medium < ApplicationRecord
       upload_started_at: upload_started_at,
       upload_completed_at: upload_completed_at,
       upload_batch_id: batch_id,
-      upload_session_id: session_id
+      upload_session_id: session_id,
+      description: ""  # Initialize to empty string, will be populated during post-processing if metadata available
     )
     
     if medium.save
@@ -834,6 +836,10 @@ class Medium < ApplicationRecord
           medium.update_columns(latitude: photo.latitude, longitude: photo.longitude)
         end
         
+        # Extract and set description from photo metadata
+        description = photo.extract_description_from_metadata if photo.respond_to?(:extract_description_from_metadata)
+        medium.update_columns(description: description || "")
+        
         # Generate thumbnail and preview after EXIF processing
         medium.mediable.generate_thumbnail if medium.mediable&.respond_to?(:generate_thumbnail)
         medium.mediable.generate_preview if medium.mediable&.respond_to?(:generate_preview)
@@ -870,6 +876,10 @@ class Medium < ApplicationRecord
         )
       end
       
+      # Extract and set description from audio metadata
+      description = audio.extract_description_from_metadata if audio.respond_to?(:extract_description_from_metadata)
+      medium.update_columns(description: description || "")
+      
       # Handle datetime
       datetime_intrinsic = medium.mediable.datetime_intrinsic if medium.mediable&.respond_to?(:datetime_intrinsic)
       
@@ -886,6 +896,11 @@ class Medium < ApplicationRecord
         rename_file_to_datetime_based_name(medium, datetime_inferred)
       end
     when 'video'
+      # Extract and set description from video metadata
+      video = medium.mediable
+      description = video.extract_description_from_metadata if video&.respond_to?(:extract_description_from_metadata)
+      medium.update_columns(description: description || "")
+      
       # Extract video metadata when we add video support
       datetime_intrinsic = medium.mediable.datetime_intrinsic if medium.mediable&.respond_to?(:datetime_intrinsic)
       
@@ -1234,17 +1249,53 @@ class Medium < ApplicationRecord
   # Add a new version to this medium
   # Called by mediable types when they create a modified version
   # @param original_file_path [String] Path to the temporary modified file
-  # @param description [String] Description of what makes this version different
-  # @param options [Hash] Additional options
+  # @param description [String] Description of what makes this version different (branch label)
+  # @param options [Hash] Additional options, including :parent (version filename to fork from)
   # @return [Boolean] Success or failure
   def add_version(original_file_path, description, options = {})
-    return false unless original_file_path.present? && File.exist?(original_file_path)
-    return false unless description.present?
+    Rails.logger.info "=== add_version called ==="
+    Rails.logger.info "  original_file_path: #{original_file_path}"
+    Rails.logger.info "  description: #{description}"
+    Rails.logger.info "  current_filename: #{current_filename}"
+    
+    unless original_file_path.present? && File.exist?(original_file_path)
+      Rails.logger.error "❌ add_version: original_file_path is missing or file doesn't exist"
+      Rails.logger.error "   original_file_path.present?: #{original_file_path.present?}"
+      Rails.logger.error "   File.exist?: #{File.exist?(original_file_path) if original_file_path.present?}"
+      return false
+    end
+    
+    unless description.present?
+      Rails.logger.error "❌ add_version: description is missing"
+      return false
+    end
+    
+    parent_version = options[:parent] # Can be nil for root versions
+    Rails.logger.info "  parent_version: #{parent_version || 'nil (root)'}"
+    
+    # Ensure aux folder exists first
+    aux_folder = aux_folder_path
+    Rails.logger.info "  aux_folder_path: #{aux_folder || 'nil'}"
+    unless aux_folder.present?
+      Rails.logger.error "❌ Cannot add version: aux_folder_path is nil (current_filename: #{current_filename})"
+      return false
+    end
+    
+    # Create aux folder if it doesn't exist
+    unless Dir.exist?(aux_folder)
+      Rails.logger.info "Creating aux folder: #{aux_folder}"
+      FileUtils.mkdir_p(aux_folder)
+    end
     
     versions_folder = versions_folder_path
+    unless versions_folder.present?
+      Rails.logger.error "Cannot add version: versions_folder_path is nil"
+      return false
+    end
     
-    # Create versions folder if it doesn't exist
+    # Create versions folder if it doesn't exist (this will also create aux folder if needed)
     unless Dir.exist?(versions_folder)
+      Rails.logger.info "Creating versions folder: #{versions_folder}"
       FileUtils.mkdir_p(versions_folder)
     end
     
@@ -1256,13 +1307,16 @@ class Medium < ApplicationRecord
     
     # Move the original file to versions
     begin
+      Rails.logger.info "Moving file to versions: #{original_file_path} -> #{version_path}"
       FileUtils.mv(original_file_path, version_path)
+      Rails.logger.info "✅ File moved successfully"
       
-      # Add version entry to database
+      # Add version entry to database with parent field
       now = Time.current.iso8601
       version_entry = {
         'filename' => version_filename,
         'description' => description,
+        'parent' => parent_version, # nil for root versions, or filename of parent version
         'created_at' => now,
         'modified_at' => now
       }
@@ -1270,12 +1324,16 @@ class Medium < ApplicationRecord
       current_versions = version_list
       current_versions << version_entry
       
-      update_columns(versions: current_versions)
+      Rails.logger.info "Updating database with #{current_versions.length} version(s)"
+      # Update database and sync versions.json
+      update!(versions: current_versions)
       
-      Rails.logger.info "Added version: #{version_filename} - #{description}"
+      Rails.logger.info "✅ Added version: #{version_filename} - #{description} (parent: #{parent_version || 'root'})"
       true
     rescue => e
-      Rails.logger.error "Failed to add version: #{e.message}"
+      Rails.logger.error "❌ Failed to add version: #{e.message}"
+      Rails.logger.error "   Error class: #{e.class}"
+      Rails.logger.error "   Backtrace: #{e.backtrace.first(5).join("\n   ")}"
       false
     end
   end
@@ -1292,8 +1350,104 @@ class Medium < ApplicationRecord
     path.present? && File.exist?(path)
   end
 
+  # Get the file path for the primary version (or main file if primary is null)
+  def primary_file_path
+    primary_value = read_attribute(:primary)
+    if primary_value.present?
+      # Use the primary version file
+      version_file_path(primary_value)
+    else
+      # Use the main/root file
+      full_file_path
+    end
+  end
+
+  # Check if primary file exists
+  def primary_file_exists?
+    primary_file_path.present? && File.exist?(primary_file_path)
+  end
+
+  # Get base filename for thumbnail/preview paths (always based on main file, not version)
+  def thumbnail_base_filename
+    return nil unless current_filename.present?
+    File.basename(current_filename, File.extname(current_filename))
+  end
+
+  # Get children versions (versions that have this version as parent)
+  def version_children(parent_filename)
+    version_list.select { |v| v['parent'] == parent_filename }
+  end
+
+  # Get the source file path for thumbnail/preview generation (uses primary if set)
+  def source_file_path_for_thumbnails
+    primary_file_path || full_file_path
+  end
+
 
   private
+
+  # Validation: ensure primary references an existing version if set
+  def primary_version_exists
+    # Only validate if primary attribute exists and has a value
+    return unless has_attribute?(:primary)
+    primary_value = read_attribute(:primary)
+    return unless primary_value.present?
+    
+    unless version_list.any? { |v| v['filename'] == primary_value }
+      errors.add(:primary, "must reference an existing version")
+    end
+  end
+
+  # Sync versions.json file in the versions folder
+  def sync_versions_json
+    versions_folder = versions_folder_path
+    return unless versions_folder.present?
+    
+    # Create versions folder if it doesn't exist
+    FileUtils.mkdir_p(versions_folder) unless Dir.exist?(versions_folder)
+    
+    json_file_path = File.join(versions_folder, 'versions.json')
+    
+    begin
+      # Build JSON structure with primary and versions
+      json_data = {
+        'primary' => read_attribute(:primary),
+        'versions' => version_list
+      }
+      
+      # Write pretty-printed JSON
+      File.write(json_file_path, JSON.pretty_generate(json_data))
+      Rails.logger.info "Synced versions.json to: #{json_file_path}"
+    rescue => e
+      Rails.logger.error "Failed to sync versions.json: #{e.message}"
+    end
+  end
+
+  # Regenerate thumbnails and previews when primary changes
+  def regenerate_thumbnails_for_primary
+    return unless primary_file_exists?
+    
+    # Delete old thumbnails/previews (these are based on main filename)
+    cleanup_thumbnails_and_previews
+    
+    # Regenerate from primary file
+    # TODO: Photo/Video models need to be updated to check medium.primary_file_path
+    # when generating thumbnails. For now, this will trigger regeneration.
+    case medium_type
+    when 'photo'
+      if mediable.present?
+        # Force regeneration - Photo model will need to use primary_file_path
+        mediable.generate_thumbnail
+      end
+    when 'video'
+      if mediable.present?
+        # Force regeneration - Video model will need to use primary_file_path
+        mediable.generate_thumbnail
+      end
+    end
+    
+    Rails.logger.info "Regenerated thumbnails/previews for primary: #{read_attribute(:primary) || 'root'}"
+  end
 
   # Extract last modified time from uploaded file
   # Now we can capture it from JavaScript using the File API's lastModified property

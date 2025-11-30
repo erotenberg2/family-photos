@@ -472,6 +472,177 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
       end
     end
 
+
+    
+    # Versions panel
+    panel "Versions" do
+      # Action buttons at top
+      div style: "margin-bottom: 20px; padding: 10px; background: #f9f9f9; border-radius: 5px; border: 1px solid #ddd;" do
+        div style: "display: inline-block; margin-right: 10px;" do
+          link_to "Create in-place version", "#", 
+                  class: 'button',
+                  onclick: "document.getElementById('create-inplace-version-form').style.display = 'block'; return false;"
+        end
+        div style: "display: inline-block;" do
+          link_to "Upload new version", "#", 
+                  class: 'button',
+                  onclick: "document.getElementById('upload-new-version-form').style.display = 'block'; return false;"
+        end
+      end
+      
+      # Create in-place version dialog
+      div id: "create-inplace-version-form", style: "display: none; margin-bottom: 20px; padding: 15px; background: #f9f9f9; border-radius: 5px; border: 1px solid #ddd;" do
+        raw <<-HTML
+          <form action="#{create_inplace_version_family_medium_path(resource)}" method="post" style="margin: 0;">
+            <input type="hidden" name="authenticity_token" value="#{form_authenticity_token}">
+            <label for="inplace-description" style="display: block; margin-bottom: 5px; font-weight: bold;">Description:</label>
+            <input type="text" id="inplace-description" name="description" required placeholder="e.g., Color corrected, Cropped, etc." style="width: 100%; padding: 8px; margin-bottom: 10px; box-sizing: border-box;">
+            <button type="submit" class="button" style="margin-right: 10px;">Create Version</button>
+            <button type="button" class="button" style="background: #999;" onclick="document.getElementById('create-inplace-version-form').style.display = 'none'; return false;">Cancel</button>
+          </form>
+        HTML
+      end
+      
+      # Upload new version dialog
+      div id: "upload-new-version-form", style: "display: none; margin-bottom: 20px; padding: 15px; background: #f9f9f9; border-radius: 5px; border: 1px solid #ddd;" do
+        raw <<-HTML
+          <form action="#{upload_new_version_family_medium_path(resource)}" method="post" enctype="multipart/form-data" style="margin: 0;">
+            <input type="hidden" name="authenticity_token" value="#{form_authenticity_token}">
+            <label for="version-file" style="display: block; margin-bottom: 5px; font-weight: bold;">File:</label>
+            <input type="file" id="version-file" name="version_file" required style="width: 100%; padding: 8px; margin-bottom: 10px; box-sizing: border-box;">
+            <label for="upload-description" style="display: block; margin-bottom: 5px; font-weight: bold;">Description:</label>
+            <input type="text" id="upload-description" name="description" required placeholder="e.g., Edited version, Final, etc." style="width: 100%; padding: 8px; margin-bottom: 10px; box-sizing: border-box;">
+            <button type="submit" class="button" style="margin-right: 10px;">Upload Version</button>
+            <button type="button" class="button" style="background: #999;" onclick="document.getElementById('upload-new-version-form').style.display = 'none'; return false;">Cancel</button>
+          </form>
+        HTML
+      end
+      
+      # Root version table (always shown, single row)
+      root_is_primary = resource.read_attribute(:primary).nil?
+      table_for [resource], class: "root-version-table" do
+        column "Root version" do |medium|
+          medium.descriptive_name.presence || File.basename(medium.current_filename, File.extname(medium.current_filename))
+        end
+        column "Description" do |medium|
+          medium.read_attribute(:description).presence || "Original file"
+        end
+        column "effective_datetime" do |medium|
+          if medium.effective_datetime
+            medium.effective_datetime.strftime("%Y-%m-%d %H:%M:%S")
+          else
+            "—"
+          end
+        end
+        column "Actions" do |medium|
+          unless root_is_primary
+            link_to("Make primary", make_primary_family_medium_path(medium, version_filename: nil),
+              method: :post,
+              confirm: "Set this root file as the primary version?",
+              style: "margin-right: 10px;")
+          else
+            span "Primary", style: "color: #0066cc; font-weight: bold;"
+          end
+        end
+      end
+      
+      versions_list = resource.version_list.sort_by { |v| v['created_at'] }
+      
+      if versions_list.any?
+        table_for versions_list do
+          column "Version" do |version|
+            File.basename(version['filename'], File.extname(version['filename']))
+          end
+          column "Description" do |version|
+            version['description']
+          end
+          column "Created" do |version|
+            if version['created_at']
+              Time.parse(version['created_at']).strftime("%Y-%m-%d %H:%M")
+            else
+              "—"
+            end
+          end
+          column "Actions" do |version|
+            version_filename = version['filename']
+            is_primary = resource.read_attribute(:primary) == version_filename
+            
+            actions = []
+            if resource.version_exists?(version_filename)
+              actions << link_to("Download", version_family_medium_path(resource, filename: version_filename),
+                style: "margin-right: 10px;")
+              
+              unless is_primary
+                actions << link_to("Make primary", make_primary_family_medium_path(resource, version_filename: version_filename),
+                  method: :post,
+                  confirm: "Set this version as the primary version?",
+                  style: "margin-right: 10px;")
+              end
+            else
+              actions << span("File not found", style: "color: #999;")
+            end
+            
+            if is_primary
+              actions << span("Primary", style: "color: #0066cc; font-weight: bold; margin-left: 10px;")
+            end
+            
+            raw actions.join(" ")
+          end
+        end
+      else
+        div "No versions", style: "padding: 20px; background: #f0f0f0; color: #666; border-radius: 8px; text-align: center;"
+      end
+    end
+    # Attachments panel
+    panel "Attachments" do
+      attachments_path = resource.attachments_folder_path
+      if attachments_path && Dir.exist?(attachments_path)
+        # List files in the attachments subfolder
+        files = Dir.glob(File.join(attachments_path, '*')).select { |f| File.file?(f) }
+        
+        if files.any?
+          table_for files do
+            column "Filename" do |file_path|
+              File.basename(file_path)
+            end
+            column "Size" do |file_path|
+              size = File.size(file_path)
+              "#{(size / 1024.0).round(2)} KB"
+            end
+            column "Actions" do |file_path|
+              link_to("Download", attachment_family_medium_path(resource, filename: File.basename(file_path)),
+                style: "margin-right: 10px;") +
+              link_to("Delete", delete_attachment_family_medium_path(resource, filename: File.basename(file_path)),
+                method: :delete,
+                confirm: "Are you sure you want to delete this attachment?",
+                style: "color: red;")
+            end
+          end
+        else
+          div "No attachments", style: "padding: 20px; background: #f0f0f0; color: #666; border-radius: 8px; text-align: center;"
+        end
+      else
+        div "No attachments", style: "padding: 20px; background: #f0f0f0; color: #666; border-radius: 8px; text-align: center;"
+      end
+      
+      div do
+        link_to "Add Attachment", "#", 
+                class: 'button',
+                onclick: "document.getElementById('attachment-upload-form').style.display = 'block'; return false;",
+                style: "margin-top: 15px;"
+      end
+      
+      div id: "attachment-upload-form", style: "display: none; margin-top: 15px; padding: 15px; background: #f9f9f9; border-radius: 5px; border: 1px solid #ddd;" do
+        raw <<-HTML
+          <form action="#{add_attachment_family_medium_path(resource)}" method="post" enctype="multipart/form-data" style="margin: 0;">
+            <input type="hidden" name="authenticity_token" value="#{form_authenticity_token}">
+            <input type="file" name="attachment" required style="margin-bottom: 10px; display: block;">
+            <button type="submit" class="button" style="margin-right: 10px;">Upload</button>
+            <button type="button" class="button" style="background: #999;" onclick="document.getElementById('attachment-upload-form').style.display = 'none'; return false;">Cancel</button>
+          </form>
+        HTML
+      end
+    end
     attributes_table do
       row :id
       row "Type" do |resource|
@@ -481,7 +652,7 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
         resource.mediable&.title || "Untitled"
       end
       row "Description" do |resource|
-        resource.mediable&.description || "No description"
+        resource.read_attribute(:description).presence || "No description"
       end
       row :original_filename
       row "Storage Path" do |resource|
@@ -681,89 +852,6 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
       end
     end
 
-    # Attachments panel
-    panel "Attachments" do
-      attachments_path = resource.attachments_folder_path
-      if attachments_path && Dir.exist?(attachments_path)
-        # List files in the attachments subfolder
-        files = Dir.glob(File.join(attachments_path, '*')).select { |f| File.file?(f) }
-        
-        if files.any?
-          table_for files do
-            column "Filename" do |file_path|
-              File.basename(file_path)
-            end
-            column "Size" do |file_path|
-              size = File.size(file_path)
-              "#{(size / 1024.0).round(2)} KB"
-            end
-            column "Actions" do |file_path|
-              link_to("Download", attachment_family_medium_path(resource, filename: File.basename(file_path)),
-                style: "margin-right: 10px;") +
-              link_to("Delete", delete_attachment_family_medium_path(resource, filename: File.basename(file_path)),
-                method: :delete,
-                confirm: "Are you sure you want to delete this attachment?",
-                style: "color: red;")
-            end
-          end
-        else
-          div "No attachments", style: "padding: 20px; background: #f0f0f0; color: #666; border-radius: 8px; text-align: center;"
-        end
-      else
-        div "No attachments", style: "padding: 20px; background: #f0f0f0; color: #666; border-radius: 8px; text-align: center;"
-      end
-      
-      div do
-        link_to "Add Attachment", "#", 
-                class: 'button',
-                onclick: "document.getElementById('attachment-upload-form').style.display = 'block'; return false;",
-                style: "margin-top: 15px;"
-      end
-      
-      div id: "attachment-upload-form", style: "display: none; margin-top: 15px; padding: 15px; background: #f9f9f9; border-radius: 5px; border: 1px solid #ddd;" do
-        raw <<-HTML
-          <form action="#{add_attachment_family_medium_path(resource)}" method="post" enctype="multipart/form-data" style="margin: 0;">
-            <input type="hidden" name="authenticity_token" value="#{form_authenticity_token}">
-            <input type="file" name="attachment" required style="margin-bottom: 10px; display: block;">
-            <button type="submit" class="button" style="margin-right: 10px;">Upload</button>
-            <button type="button" class="button" style="background: #999;" onclick="document.getElementById('attachment-upload-form').style.display = 'none'; return false;">Cancel</button>
-          </form>
-        HTML
-      end
-    end
-
-    # Versions panel
-    panel "Versions" do
-      versions_list = resource.version_list.sort_by { |v| v['created_at'] }
-      
-      if versions_list.any?
-        table_for versions_list do
-          column "Version" do |version|
-            File.basename(version['filename'], File.extname(version['filename']))
-          end
-          column "Description" do |version|
-            version['description']
-          end
-          column "Created" do |version|
-            if version['created_at']
-              Time.parse(version['created_at']).strftime("%Y-%m-%d %H:%M")
-            else
-              "—"
-            end
-          end
-          column "Actions" do |version|
-            if resource.version_exists?(version['filename'])
-              link_to("Download", version_family_medium_path(resource, filename: version['filename']),
-                style: "margin-right: 10px;")
-            else
-              span "File not found", style: "color: #999;"
-            end
-          end
-        end
-      else
-        div "No versions", style: "padding: 20px; background: #f0f0f0; color: #666; border-radius: 8px; text-align: center;"
-      end
-    end
   end
 
   # Form for editing media
@@ -860,6 +948,163 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
       end
     else
       redirect_to family_medium_path(medium), alert: "No filename provided"
+    end
+  end
+
+  # Set a version (or root) as the primary version
+  member_action :make_primary, method: :post do
+    medium = resource
+    version_filename = params[:version_filename]
+    
+    begin
+      if version_filename.blank?
+        # Setting root as primary (clear primary column)
+        medium.update!(primary: nil)
+        Rails.logger.info "Set root file as primary for medium #{medium.id}"
+        redirect_to family_medium_path(medium), notice: "Root file set as primary version"
+      else
+        # Verify version exists
+        unless medium.version_exists?(version_filename)
+          redirect_to family_medium_path(medium), alert: "Version file not found"
+          return
+        end
+        
+        # Verify version is in the versions list
+        unless medium.version_list.any? { |v| v['filename'] == version_filename }
+          redirect_to family_medium_path(medium), alert: "Version not found in versions list"
+          return
+        end
+        
+        # Set this version as primary
+        medium.update!(primary: version_filename)
+        Rails.logger.info "Set version #{version_filename} as primary for medium #{medium.id}"
+        redirect_to family_medium_path(medium), notice: "Version set as primary"
+      end
+    rescue => e
+      Rails.logger.error "Failed to set primary version: #{e.message}"
+      Rails.logger.error e.backtrace.join("\n")
+      redirect_to family_medium_path(medium), alert: "Error setting primary version: #{e.message}"
+    end
+  end
+
+  # Create a new version by copying the current primary file
+  member_action :create_inplace_version, method: :post do
+    medium = resource
+    description = params[:description]&.strip
+    
+    unless description.present?
+      redirect_to family_medium_path(medium), alert: "Description is required"
+      return
+    end
+    
+    begin
+      # Verify medium has a filename
+      unless medium.current_filename.present?
+        redirect_to family_medium_path(medium), alert: "Medium does not have a filename. Cannot create version."
+        return
+      end
+      
+      # Get the primary file path (or main file if primary is null)
+      source_path = medium.source_file_path_for_thumbnails || medium.full_file_path
+      
+      unless source_path.present? && File.exist?(source_path)
+        Rails.logger.error "Source file not found for medium #{medium.id}: #{source_path}"
+        redirect_to family_medium_path(medium), alert: "Source file not found. Cannot create version."
+        return
+      end
+      
+      Rails.logger.info "Creating in-place version from: #{source_path}"
+      
+      # Create a temporary copy of the file
+      require 'tempfile'
+      temp_file = Tempfile.new([File.basename(source_path, File.extname(source_path)), File.extname(source_path)])
+      temp_path = temp_file.path
+      FileUtils.cp(source_path, temp_path)
+      temp_file.close  # Close file handle but keep file on disk (don't use close! which unlinks)
+      Rails.logger.info "Created temp file: #{temp_path}, exists: #{File.exist?(temp_path)}"
+      
+      # Verify temp file exists before proceeding
+      unless File.exist?(temp_path)
+        redirect_to family_medium_path(medium), alert: "Failed to create temporary file copy"
+        return
+      end
+      
+      begin
+        # Add version (parent will be current primary if set, otherwise nil for root)
+        parent_version = medium.read_attribute(:primary)
+        Rails.logger.info "Calling add_version with temp_path: #{temp_path} (exists: #{File.exist?(temp_path)})"
+        success = medium.add_version(temp_path, description, parent: parent_version)
+        
+        if success
+          redirect_to family_medium_path(medium), notice: "Version created successfully"
+          return
+        else
+          # Clean up temp file if add_version failed
+          File.delete(temp_path) if File.exist?(temp_path)
+          Rails.logger.error "add_version returned false for medium #{medium.id}"
+          redirect_to family_medium_path(medium), alert: "Failed to create version. Check logs for details."
+          return
+        end
+      rescue => add_error
+        # Clean up temp file on error
+        File.delete(temp_path) if File.exist?(temp_path)
+        raise add_error
+      end
+    rescue => e
+      Rails.logger.error "Failed to create in-place version: #{e.message}"
+      Rails.logger.error e.backtrace.join("\n")
+      redirect_to family_medium_path(medium), alert: "Error creating version: #{e.message}"
+    end
+  end
+
+  # Upload a new file as a version
+  member_action :upload_new_version, method: :post do
+    medium = resource
+    uploaded_file = params[:version_file]
+    description = params[:description]&.strip
+    
+    unless uploaded_file.present?
+      redirect_to family_medium_path(medium), alert: "No file provided"
+      return
+    end
+    
+    unless description.present?
+      redirect_to family_medium_path(medium), alert: "Description is required"
+      return
+    end
+    
+    begin
+      # Save uploaded file to temporary location
+      require 'tempfile'
+      temp_file = Tempfile.new([File.basename(uploaded_file.original_filename, File.extname(uploaded_file.original_filename)), File.extname(uploaded_file.original_filename)])
+      temp_path = temp_file.path
+      File.binwrite(temp_path, uploaded_file.read)
+      temp_file.close  # Close file handle but keep file on disk (don't use close! which unlinks)
+      Rails.logger.info "Created temp file: #{temp_path}, exists: #{File.exist?(temp_path)}"
+      
+      begin
+        # Add version (parent will be current primary if set, otherwise nil for root)
+        parent_version = medium.read_attribute(:primary)
+        success = medium.add_version(temp_path, description, parent: parent_version)
+        
+        if success
+          redirect_to family_medium_path(medium), notice: "Version uploaded successfully"
+          return
+        else
+          # Clean up temp file if add_version failed
+          File.delete(temp_path) if File.exist?(temp_path)
+          redirect_to family_medium_path(medium), alert: "Failed to upload version"
+          return
+        end
+      rescue => add_error
+        # Clean up temp file on error
+        File.delete(temp_path) if File.exist?(temp_path)
+        raise add_error
+      end
+    rescue => e
+      Rails.logger.error "Failed to upload new version: #{e.message}"
+      Rails.logger.error e.backtrace.join("\n")
+      redirect_to family_medium_path(medium), alert: "Error uploading version: #{e.message}"
     end
   end
 
