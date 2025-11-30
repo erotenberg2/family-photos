@@ -1299,11 +1299,44 @@ class Medium < ApplicationRecord
       FileUtils.mkdir_p(versions_folder)
     end
     
-    # Generate version filename
-    version_number = version_list.length + 1
+    # Generate unique version filename
+    # Always use the main file's extension, not the uploaded file's extension
     original_ext = File.extname(current_filename)
-    version_filename = "v#{version_number}_#{description.parameterize}#{original_ext}"
-    version_path = File.join(versions_folder, version_filename)
+    base_version_list = version_list
+    version_number = base_version_list.length + 1
+    version_filename = nil
+    version_path = nil
+    
+    # Generate candidate filename and ensure uniqueness
+    loop do
+      candidate_filename = "v#{version_number}_#{description.parameterize}#{original_ext}"
+      candidate_path = File.join(versions_folder, candidate_filename)
+      
+      # Check if this filename is already used in the versions list
+      filename_exists_in_list = base_version_list.any? { |v| v['filename'] == candidate_filename }
+      
+      # Check if file already exists on disk
+      file_exists_on_disk = File.exist?(candidate_path)
+      
+      # If both checks pass, this filename is unique - use it
+      unless filename_exists_in_list || file_exists_on_disk
+        version_filename = candidate_filename
+        version_path = candidate_path
+        break  # Found a unique filename
+      end
+      
+      # Conflict detected, increment version number and try again
+      Rails.logger.warn "Version filename conflict: #{candidate_filename}, trying next number..."
+      version_number += 1
+      
+      # Safety limit to prevent infinite loops
+      if version_number > base_version_list.length + 100
+        Rails.logger.error "Could not generate unique version filename after 100 attempts"
+        return false
+      end
+    end
+    
+    Rails.logger.info "Generated unique version filename: #{version_filename}"
     
     # Move the original file to versions
     begin

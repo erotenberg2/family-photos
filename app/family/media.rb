@@ -521,6 +521,13 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
       # Root version table (always shown, single row)
       root_is_primary = resource.read_attribute(:primary).nil?
       table_for [resource], class: "root-version-table" do
+        column "Primary" do |medium|
+          if root_is_primary
+            raw '<span style="color: #28a745; font-size: 18px; font-weight: bold;">✓</span>'
+          else
+            "—"
+          end
+        end
         column "Root version" do |medium|
           medium.descriptive_name.presence || File.basename(medium.current_filename, File.extname(medium.current_filename))
         end
@@ -540,8 +547,6 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
               method: :post,
               confirm: "Set this root file as the primary version?",
               style: "margin-right: 10px;")
-          else
-            span "Primary", style: "color: #0066cc; font-weight: bold;"
           end
         end
       end
@@ -550,11 +555,28 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
       
       if versions_list.any?
         table_for versions_list do
+          column "Primary" do |version|
+            version_filename = version['filename']
+            is_primary = resource.read_attribute(:primary) == version_filename
+            if is_primary
+              raw '<span style="color: #28a745; font-size: 18px; font-weight: bold;">✓</span>'
+            else
+              "—"
+            end
+          end
           column "Version" do |version|
             File.basename(version['filename'], File.extname(version['filename']))
           end
           column "Description" do |version|
             version['description']
+          end
+          column "Parent" do |version|
+            parent_filename = version['parent']
+            if parent_filename.present?
+              File.basename(parent_filename, File.extname(parent_filename))
+            else
+              "—"
+            end
           end
           column "Created" do |version|
             if version['created_at']
@@ -580,10 +602,6 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
               end
             else
               actions << span("File not found", style: "color: #999;")
-            end
-            
-            if is_primary
-              actions << span("Primary", style: "color: #0066cc; font-weight: bold; margin-left: 10px;")
             end
             
             raw actions.join(" ")
@@ -1030,8 +1048,11 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
       end
       
       begin
-        # Add version (parent will be current primary if set, otherwise nil for root)
-        parent_version = medium.read_attribute(:primary)
+        # New version should be a child of the current primary version
+        # If primary is a version filename, use that; if primary is nil (root is primary), use nil
+        current_primary = medium.read_attribute(:primary)
+        parent_version = current_primary  # Will be version filename or nil (for root)
+        Rails.logger.info "Creating version as child of: #{parent_version || 'root (primary)'}"
         Rails.logger.info "Calling add_version with temp_path: #{temp_path} (exists: #{File.exist?(temp_path)})"
         success = medium.add_version(temp_path, description, parent: parent_version)
         
@@ -1083,8 +1104,11 @@ ActiveAdmin.register Medium, namespace: :family, as: 'Media' do
       Rails.logger.info "Created temp file: #{temp_path}, exists: #{File.exist?(temp_path)}"
       
       begin
-        # Add version (parent will be current primary if set, otherwise nil for root)
-        parent_version = medium.read_attribute(:primary)
+        # New version should be a child of the current primary version
+        # If primary is a version filename, use that; if primary is nil (root is primary), use nil
+        current_primary = medium.read_attribute(:primary)
+        parent_version = current_primary  # Will be version filename or nil (for root)
+        Rails.logger.info "Creating version as child of: #{parent_version || 'root (primary)'}"
         success = medium.add_version(temp_path, description, parent: parent_version)
         
         if success
