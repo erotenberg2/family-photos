@@ -193,5 +193,33 @@ ActiveAdmin.register Audio, namespace: :family do
     f.actions
   end
 
+  # Edit an audio version (placeholder)
+  member_action :edit_version, method: :get do
+    audio = resource
+    medium = audio.medium
+    version_filename = params[:filename]
+    
+    unless version_filename.present?
+      redirect_to family_medium_path(medium), alert: "No version filename provided"
+      return
+    end
+    
+    unless medium.version_exists?(version_filename)
+      redirect_to family_medium_path(medium), alert: "Version file not found"
+      return
+    end
+    
+    @audio = audio
+    @medium = medium
+    @version_filename = version_filename
+    
+    render 'edit_version_audio', layout: 'application'
+  end
+
+  # Update an audio version (placeholder)
+  member_action :update_version, method: :post do
+    render json: { success: false, message: "Audio editing not yet implemented" }, status: :not_implemented
+  end
+
 end
 

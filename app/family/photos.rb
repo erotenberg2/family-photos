@@ -265,5 +265,149 @@ ActiveAdmin.register Photo, namespace: :family do
     f.actions
   end
 
+  # Serve version file for display (inline, not download)
+  member_action :version_image, method: :get do
+    photo = resource
+    medium = photo.medium
+    filename = params[:filename]
+    
+    if filename.present?
+      versions_folder = medium.versions_folder_path
+      file_path = File.join(versions_folder, filename)
+      
+      if File.exist?(file_path)
+        send_file(file_path, 
+                  type: medium.content_type, 
+                  disposition: 'inline',
+                  filename: filename)
+      else
+        head :not_found
+      end
+    else
+      head :not_found
+    end
+  end
+
+  # Edit a photo version
+  member_action :edit_version, method: :get do
+    photo = resource
+    medium = photo.medium
+    version_filename = params[:filename]
+    
+    unless version_filename.present?
+      redirect_to family_medium_path(medium), alert: "No version filename provided"
+      return
+    end
+    
+    unless medium.version_exists?(version_filename)
+      redirect_to family_medium_path(medium), alert: "Version file not found"
+      return
+    end
+    
+    @photo = photo
+    @medium = medium
+    @version_filename = version_filename
+    @version_file_path = medium.version_file_path(version_filename)
+    @is_primary = medium.read_attribute(:primary) == version_filename
+    
+    render 'edit_version_photo', layout: 'application'
+  end
+
+  # Update a photo version (save edits)
+  member_action :update_version, method: :post do
+    photo = resource
+    medium = photo.medium
+    version_filename = params[:filename]
+    
+    unless version_filename.present?
+      redirect_to family_medium_path(medium), alert: "No version filename provided"
+      return
+    end
+    
+    unless medium.version_exists?(version_filename)
+      redirect_to family_medium_path(medium), alert: "Version file not found"
+      return
+    end
+    
+    @photo = photo
+    @medium = medium
+    @version_filename = version_filename
+    @is_primary = medium.read_attribute(:primary) == version_filename
+    
+    # Process photo edits (cropping, brightness, contrast)
+    process_photo_edits(medium, version_filename, params)
+  end
+
+  controller do
+    private
+
+    def process_photo_edits(medium, version_filename, params)
+      version_file_path = medium.version_file_path(version_filename)
+      
+      unless version_file_path.present? && File.exist?(version_file_path)
+        render json: { success: false, error: "Version file not found" }, status: :not_found
+        return
+      end
+      
+      begin
+        require 'mini_magick'
+        
+        image = MiniMagick::Image.open(version_file_path)
+        original_image = image.dup
+        
+        # Apply cropping if provided
+        if params[:crop_x].present? && params[:crop_y].present? && 
+           params[:crop_width].present? && params[:crop_height].present?
+          x = params[:crop_x].to_i
+          y = params[:crop_y].to_i
+          width = params[:crop_width].to_i
+          height = params[:crop_height].to_i
+          
+          if width > 0 && height > 0
+            image.crop("#{width}x#{height}+#{x}+#{y}")
+            Rails.logger.info "Applied crop: #{width}x#{height} at (#{x},#{y})"
+          end
+        end
+        
+        # Apply brightness and contrast adjustments
+        # ImageMagick brightness-contrast: brightness ranges from -100 to +100, contrast from -100 to +100
+        brightness = params[:brightness].present? ? params[:brightness].to_f : 0
+        contrast = params[:contrast].present? ? params[:contrast].to_f : 0
+        
+        if brightness != 0 || contrast != 0
+          # Scale down brightness to ImageMagick: +100 on-screen → +80 in ImageMagick
+          # Adjust brightness_scale_factor (0.8 = 80% of slider value) to tune the mapping
+          brightness_scale_factor = 0.8
+          
+          # Apply scaling to positive brightness values only (negative values stay linear)
+          imagemagick_brightness = brightness < 0 ? brightness : brightness * brightness_scale_factor
+          
+          # brightness-contrast: first value is brightness (-100 to +100), second is contrast (-100 to +100)
+          image.brightness_contrast("#{imagemagick_brightness}x#{contrast}")
+          Rails.logger.info "Applied brightness: #{imagemagick_brightness} (from slider: #{brightness}), contrast: #{contrast}"
+        end
+        
+        # Save the edited image
+        image.write(version_file_path)
+        
+        Rails.logger.info "Saved edited version: #{version_file_path}"
+        
+        # If this version is primary, regenerate thumbnails and previews
+        if medium.read_attribute(:primary) == version_filename
+          Rails.logger.info "Version is primary, regenerating thumbnails and previews"
+          if medium.mediable&.respond_to?(:generate_thumbnail)
+            medium.mediable.generate_thumbnail
+          end
+        end
+        
+        # Close popup and refresh parent
+        render json: { success: true, message: "Version updated successfully" }, status: :ok
+      rescue => e
+        Rails.logger.error "Failed to process photo edits: #{e.message}"
+        Rails.logger.error e.backtrace.join("\n")
+        render json: { success: false, error: e.message }, status: :unprocessable_entity
+      end
+    end
+  end
 
 end

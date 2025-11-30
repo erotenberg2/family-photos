@@ -1400,6 +1400,24 @@ class Medium < ApplicationRecord
     primary_file_path.present? && File.exist?(primary_file_path)
   end
 
+  # Get version information string for display
+  def version_info_text
+    primary_version = read_attribute(:primary)
+    
+    if primary_version.blank?
+      "Root file (primary)"
+    else
+      version_entry = version_list.find { |v| v['filename'] == primary_version }
+      if version_entry && version_entry['description'].present?
+        "Edited version: #{version_entry['description']} (primary)"
+      elsif primary_version.present?
+        "Edited version: #{primary_version} (primary)"
+      else
+        "Root file (primary)"
+      end
+    end
+  end
+
   # Get base filename for thumbnail/preview paths (always based on main file, not version)
   def thumbnail_base_filename
     return nil unless current_filename.present?
