@@ -14,7 +14,7 @@ module Constants
   
   # Event hierarchy depth limit
   EVENT_RECURSION_DEPTH = 3
-  
+   
   # Media type icons
   CAMERA_ICON = "📷"
   AUDIO_ICON = "🎵"
