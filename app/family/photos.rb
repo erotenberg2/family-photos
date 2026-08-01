@@ -140,7 +140,7 @@ ActiveAdmin.register Photo, namespace: :family do
       row :title
       row :description
       row :original_filename
-      row :file_path
+      row :full_file_path
       row :current_filename
       row :content_type
       row :file_size do |photo|

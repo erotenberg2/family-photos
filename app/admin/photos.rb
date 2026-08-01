@@ -1,7 +1,7 @@
 ActiveAdmin.register Photo do
 
   # Permitted parameters
-  permit_params :title, :description, :file_path, :file_size, :width, :height, 
+  permit_params :title, :description, :file_size, :width, :height, 
                 :exif_data, :thumbnail_path, :thumbnail_width, 
                 :thumbnail_height, :uploaded_by_id, :user_id, :original_filename, 
                 :content_type, :md5_hash, :latitude, :longitude, :camera_make, :camera_model
@@ -61,7 +61,7 @@ ActiveAdmin.register Photo do
       row :title
       row :description
       row :original_filename
-      row :file_path
+      row :full_file_path
       row :content_type
       row :file_size do |photo|
         photo.file_size_human
@@ -120,7 +120,6 @@ ActiveAdmin.register Photo do
     f.inputs "Photo Details" do
       f.input :title
       f.input :description
-      f.input :file_path
       f.input :original_filename
       f.input :content_type, as: :select, collection: %w[image/jpeg image/png image/gif image/bmp image/tiff]
       f.input :user
